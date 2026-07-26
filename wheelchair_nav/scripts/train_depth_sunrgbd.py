@@ -16,10 +16,20 @@ objective is new; DepthEncoder/DepthDecoder are imported unchanged.
 Usage:
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
         --splits_dir ./splits_sunrgbd --num_epochs 40 --batch_size 16
+
+Hyperparameters found by scripts/tune_depth_sunrgbd.py (Optuna, TPE
+sampler) can be applied directly with --hparams_json, which overrides
+--learning_rate/--batch_size/--smoothness_weight/--si_lambda/--weight_decay
+with the tuned values before training starts:
+
+    python -m wheelchair_nav.scripts.train_depth_sunrgbd \
+        --splits_dir ./splits_sunrgbd --num_epochs 40 \
+        --hparams_json ./log_sunrgbd/optuna_best_depth_hparams.json
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -72,11 +82,26 @@ def parse_args():
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--num_epochs", type=int, default=40)
     p.add_argument("--learning_rate", type=float, default=1e-4)
+    p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--scheduler_step_size", type=int, default=25)
     p.add_argument("--smoothness_weight", type=float, default=1e-3)
+    p.add_argument("--si_lambda", type=float, default=0.5, help="scale-invariant log loss weight (Eigen et al.)")
     p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--no_cuda", action="store_true")
-    return p.parse_args()
+    p.add_argument("--hparams_json", default=None,
+                    help="JSON from tune_depth_sunrgbd.py ({'best_params': {...}}); overrides "
+                         "learning_rate/batch_size/smoothness_weight/si_lambda/weight_decay")
+    args = p.parse_args()
+
+    if args.hparams_json:
+        with open(args.hparams_json, "r") as f:
+            best_params = json.load(f).get("best_params", {})
+        for key in ("learning_rate", "batch_size", "smoothness_weight", "si_lambda", "weight_decay"):
+            if key in best_params:
+                setattr(args, key, best_params[key])
+        print(f"Loaded tuned hyperparameters from {args.hparams_json}: {best_params}")
+
+    return args
 
 
 def main():
@@ -110,7 +135,7 @@ def main():
     decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(device)
 
     params = list(encoder.parameters()) + list(decoder.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.learning_rate)
+    optimizer = torch.optim.Adam(params, lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
 
     save_root = os.path.join(args.log_dir, args.model_name, "models")
@@ -133,7 +158,7 @@ def main():
 
             loss = (
                 masked_l1(depth_pred, depth_gt, valid)
-                + scale_invariant_log_loss(depth_pred, depth_gt, valid)
+                + scale_invariant_log_loss(depth_pred, depth_gt, valid, lam=args.si_lambda)
                 + args.smoothness_weight * get_smooth_loss(disp, color)
             )
 
