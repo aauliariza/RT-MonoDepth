@@ -1,24 +1,37 @@
 """Preprocessing of the SUN RGB-D dataset (https://rgbd.cs.princeton.edu/)
-into the RGB / metric-depth pairs used to train RT-MonoDepth from scratch
-(wheelchair_nav/datasets/sunrgbd_dataset.py), and optionally into:
-  - single-class ("obstacle") YOLO detection labels used to fine-tune
-    YOLO26-nano (--make_yolo_labels);
-  - the images/{split}+depth/{split} layout Ultralytics' native depth task
-    expects, mirroring the exact same train/val/test split used for
-    RT-MonoDepth/FastDepth, so YOLO26n-depth/YOLO26s-depth can be trained
-    and compared apples-to-apples against RT-MonoDepth on identical images
+into:
+  - the RGB / metric-depth pairs used to train RT-MonoDepth from scratch
+    (wheelchair_nav/datasets/sunrgbd_dataset.py);
+  - single-class ("obstacle") YOLO detection labels converted from SUN
+    RGB-D's OWN 2D bounding-box annotations (annotation2Dfinal/index.json,
+    --make_yolo_labels). This is the only dataset used to train
+    YOLO26-nano in this project -- no COCO, no other dataset, and
+    scripts/train_yolo_obstacle.py trains from random weights, never from
+    a pretrained checkpoint;
+  - (optional, comparison baselines only) the images/{split}+depth/{split}
+    layout Ultralytics' native depth task expects, mirroring the exact
+    same train/val/test split used for RT-MonoDepth/FastDepth, so
+    YOLO26n-depth/YOLO26s-depth can be trained and compared
+    apples-to-apples against RT-MonoDepth on identical images
     (--make_yolo_depth_layout; see evaluation/eval_depth_comparison.py).
 
 SUN RGB-D ships as per-scene folders under kv1/, kv2/, realsense/ and
 xtion/, each containing image/*.jpg, depth_bfx/*.png (sensor-refined
-depth, preferred over the raw depth/ folder) and intrinsics.txt. Depth
-PNGs store a bit-rotated 16-bit Kinect encoding (see `_decode_depth_png`
-for the standard SUNRGBDtoolbox formula: a 3-bit rotate then /1000 for
-meters). Some RealSense/Xtion scenes in public re-releases store plain
-millimeter depth instead -- pass --depth_encoding raw_mm if the bitshift
-decode looks wrong (mostly-zero depth maps), or leave the default
-"bitshift" and let the automatic per-scene fallback in process_depth()
-catch it.
+depth, preferred over the raw depth/ folder), intrinsics.txt, and
+annotation2Dfinal/index.json (2D polygon annotations). Depth PNGs store a
+bit-rotated 16-bit Kinect encoding (see `_decode_depth_png` for the
+standard SUNRGBDtoolbox formula: a 3-bit rotate then /1000 for meters).
+Some RealSense/Xtion scenes in public re-releases store plain millimeter
+depth instead -- pass --depth_encoding raw_mm if the bitshift decode looks
+wrong (mostly-zero depth maps), or leave the default "bitshift" and let
+the automatic per-scene fallback in process_depth() catch it.
+
+annotation2Dfinal/index.json schema (verified against community SUN RGB-D
+parsers, e.g. Mask_RCNN-for-SUN-RGB-D's samples/sun/SUNRGBD.py):
+    {"frames": [{"polygon": [{"x": [...], "y": [...], "object": <int index
+     into "objects">}, ...]}], "objects": [{"name": "chair"}, null, ...]}
+x/y are pixel coordinates in the associated image/*.jpg. "objects" entries
+can be null (deleted/merged objects); see _parse_annotation2d().
 
 Usage:
     python -m wheelchair_nav.scripts.prepare_sunrgbd \
@@ -141,23 +154,93 @@ def process_depth(args):
     return splits
 
 
-def process_yolo_labels(args):
-    """Best-effort conversion of SUN RGB-D 2D annotations
-    (annotation2Dfinal/index.json) into single-class ("obstacle") YOLO
-    labels. The annotation2Dfinal layout has drifted across SUN RGB-D
-    re-releases, so scenes that don't match the expected schema are
-    skipped rather than aborting the whole run. If too few scenes convert,
-    fine-tune YOLO26-nano from COCO-pretrained weights directly instead
-    (see README) -- SUN RGB-D box labels are an optional refinement, not a
-    requirement, for the obstacle detector.
-    """
-    scenes = _find_scenes(args.sunrgbd_root)
-    img_out = os.path.join(args.yolo_out_dir, "images")
-    lbl_out = os.path.join(args.yolo_out_dir, "labels")
-    os.makedirs(img_out, exist_ok=True)
-    os.makedirs(lbl_out, exist_ok=True)
+def _link_or_copy(src: str, dst: str) -> None:
+    if os.path.exists(dst) or os.path.islink(dst):
+        return
+    try:
+        os.symlink(os.path.abspath(src), dst)
+    except OSError:
+        shutil.copy2(src, dst)
 
-    n_ok, n_skip = 0, 0
+
+def _split_items(items: list, val_ratio: float, test_ratio: float, seed: int) -> dict:
+    """Shuffles a list with its own local RNG (so it doesn't perturb the
+    global random.seed() state process_depth() also relies on) and splits
+    it the same way process_depth() splits RGB/depth pairs.
+    """
+    items = list(items)
+    random.Random(seed).shuffle(items)
+    n = len(items)
+    n_val = max(1, int(n * val_ratio))
+    n_test = max(1, int(n * test_ratio))
+    test_items = items[:n_test]
+    val_items = items[n_test:n_test + n_val]
+    train_items = items[n_test + n_val:]
+    return {"train": train_items, "val": val_items, "test": test_items}
+
+
+def _parse_annotation2d(ann_path: str, img_shape, exclude_classes: set, max_box_area_ratio: float):
+    """Parses one SUN RGB-D annotation2Dfinal/index.json into class-agnostic
+    YOLO label lines ("0 cx cy w h", normalized), using the schema
+    frames[0]["polygon"][i] = {"x": [...], "y": [...], "object": idx} and
+    objects[idx]["name"] to drop room-surface classes (wall/floor/ceiling
+    by default) that would otherwise become near-full-frame "obstacle"
+    boxes and poison training. --max_box_area_ratio is a second safety net
+    against any remaining oversized polygon regardless of its class name.
+    """
+    with open(ann_path, "r") as f:
+        ann = json.load(f)
+    h, w = img_shape[:2]
+    frame = ann["frames"][0]
+    objects = ann.get("objects", [])
+    max_area = max_box_area_ratio * w * h
+
+    lines = []
+    for poly in frame.get("polygon", []):
+        xs, ys = poly.get("x", []), poly.get("y", [])
+        if not xs or not ys:
+            continue
+
+        obj_idx = poly.get("object")
+        if isinstance(obj_idx, int) and 0 <= obj_idx < len(objects) and objects[obj_idx]:
+            name = str(objects[obj_idx].get("name", "")).strip().lower()
+            if name in exclude_classes:
+                continue
+
+        x1, x2 = max(min(xs), 0), min(max(xs), w)
+        y1, y2 = max(min(ys), 0), min(max(ys), h)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        if (x2 - x1) * (y2 - y1) > max_area:
+            continue
+
+        cx, cy = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
+        bw, bh = (x2 - x1) / w, (y2 - y1) / h
+        lines.append(f"0 {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+
+    return lines
+
+
+def process_yolo_labels(args):
+    """Converts SUN RGB-D's own 2D bounding-box annotations
+    (annotation2Dfinal/index.json) into single-class ("obstacle") YOLO
+    detection labels -- the only dataset scripts/train_yolo_obstacle.py
+    trains on (no COCO, no other dataset, no pretrained weights). Scenes
+    missing annotation2Dfinal/, or whose JSON doesn't parse (a handful of
+    scenes in the official release have malformed JSON), are skipped and
+    counted, not silently substituted with another data source.
+    """
+    exclude_classes = {c.strip().lower() for c in args.exclude_classes.split(",") if c.strip()}
+    scenes = _find_scenes(args.sunrgbd_root)
+    if not scenes:
+        raise SystemExit(
+            f"No SUN RGB-D scenes found under {args.sunrgbd_root}. "
+            "Expected kv1/kv2/realsense/xtion subfolders, each scene "
+            "containing image/ and annotation2Dfinal/."
+        )
+
+    items = []  # (scene_id, rgb_path, ext, yolo_lines)
+    n_skip = 0
     for scene_dir in tqdm(scenes, desc="Converting SUN RGB-D 2D boxes to YOLO"):
         ann_path = os.path.join(scene_dir, "annotation2Dfinal", "index.json")
         found = _scene_rgb_depth(scene_dir)
@@ -166,62 +249,53 @@ def process_yolo_labels(args):
             continue
         rgb_path, _ = found
         try:
-            with open(ann_path, "r") as f:
-                ann = json.load(f)
             img = cv2.imread(rgb_path)
-            h, w = img.shape[:2]
-            frame = ann["frames"][0]
-
-            lines = []
-            for poly in frame.get("polygon", []):
-                xs, ys = poly.get("x", []), poly.get("y", [])
-                if not xs or not ys:
-                    continue
-                x1, x2 = max(min(xs), 0), min(max(xs), w)
-                y1, y2 = max(min(ys), 0), min(max(ys), h)
-                if x2 <= x1 or y2 <= y1:
-                    continue
-                cx, cy = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
-                bw, bh = (x2 - x1) / w, (y2 - y1) / h
-                lines.append(f"0 {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
-
+            if img is None:
+                n_skip += 1
+                continue
+            lines = _parse_annotation2d(ann_path, img.shape, exclude_classes, args.max_box_area_ratio)
             if not lines:
                 n_skip += 1
                 continue
-
             scene_id = os.path.relpath(scene_dir, args.sunrgbd_root).replace(os.sep, "_")
             ext = os.path.splitext(rgb_path)[1]
-            cv2.imwrite(os.path.join(img_out, f"{scene_id}{ext}"), img)
-            with open(os.path.join(lbl_out, f"{scene_id}.txt"), "w") as f:
-                f.write("\n".join(lines))
-            n_ok += 1
+            items.append((scene_id, rgb_path, ext, lines))
         except Exception:
             n_skip += 1
             continue
 
-    print(f"YOLO obstacle labels: {n_ok} scenes converted, {n_skip} skipped.")
-    if n_ok < 200:
-        print(
-            "Few scenes converted -- consider fine-tuning YOLO26-nano from "
-            "COCO-pretrained weights directly instead (see README)."
+    print(f"YOLO obstacle labels: {len(items)} scenes converted, {n_skip} skipped "
+          "(missing/unparseable annotation2Dfinal, or no non-structural objects).")
+    if not items:
+        raise SystemExit(
+            "No SUN RGB-D scenes produced usable obstacle labels -- check that "
+            "--sunrgbd_root contains annotation2Dfinal/index.json per scene, and "
+            "that --exclude_classes isn't dropping everything."
         )
+
+    splits = _split_items(items, args.val_ratio, args.test_ratio, args.seed)
+    for split_name, split_items in splits.items():
+        img_dir = os.path.join(args.yolo_out_dir, "images", split_name)
+        lbl_dir = os.path.join(args.yolo_out_dir, "labels", split_name)
+        os.makedirs(img_dir, exist_ok=True)
+        os.makedirs(lbl_dir, exist_ok=True)
+        for scene_id, rgb_path, ext, lines in split_items:
+            _link_or_copy(rgb_path, os.path.join(img_dir, f"{scene_id}{ext}"))
+            with open(os.path.join(lbl_dir, f"{scene_id}.txt"), "w") as f:
+                f.write("\n".join(lines))
+        print(f"  {split_name}: {len(split_items)} images -> {img_dir}")
 
     yaml_path = os.path.join(args.yolo_out_dir, "obstacle.yaml")
     with open(yaml_path, "w") as f:
         f.write(
             f"path: {os.path.abspath(args.yolo_out_dir)}\n"
-            "train: images\nval: images\nnc: 1\nnames: ['obstacle']\n"
+            "train: images/train\n"
+            "val: images/val\n"
+            "test: images/test\n"
+            "nc: 1\n"
+            "names: ['obstacle']\n"
         )
     print(f"Wrote {yaml_path} (single class: obstacle)")
-
-
-def _link_or_copy(src: str, dst: str) -> None:
-    if os.path.exists(dst) or os.path.islink(dst):
-        return
-    try:
-        os.symlink(os.path.abspath(src), dst)
-    except OSError:
-        shutil.copy2(src, dst)
 
 
 def process_yolo_depth_layout(args, splits: dict) -> None:
@@ -276,8 +350,17 @@ def parse_args():
     parser.add_argument("--val_ratio", type=float, default=0.1)
     parser.add_argument("--test_ratio", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--make_yolo_labels", action="store_true")
+    parser.add_argument("--make_yolo_labels", action="store_true",
+                         help="Convert SUN RGB-D's own annotation2Dfinal/ 2D boxes into YOLO obstacle "
+                              "labels -- required before training YOLO26-nano (train_yolo_obstacle.py)")
     parser.add_argument("--yolo_out_dir", default="./data/sunrgbd_yolo")
+    parser.add_argument("--exclude_classes", default="wall,floor,ceiling",
+                         help="Comma-separated SUN RGB-D object names (case-insensitive) to drop -- "
+                              "room surfaces are not physical obstacles and would otherwise become "
+                              "near-full-frame boxes")
+    parser.add_argument("--max_box_area_ratio", type=float, default=0.9,
+                         help="Drop any box covering more than this fraction of the image area, "
+                              "regardless of class name (second safety net against mislabeled polygons)")
     parser.add_argument("--make_yolo_depth_layout", action="store_true",
                          help="Also mirror the train/val/test split into the images/+depth/ layout "
                               "used by YOLO26n-depth/YOLO26s-depth (baselines/yolo_depth_estimator.py)")

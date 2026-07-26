@@ -81,7 +81,9 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--video", required=True)
     p.add_argument("--depth_weights", required=True, help="Folder with encoder.pth + depth.pth")
-    p.add_argument("--yolo_weights", default="yolo26n.pt")
+    p.add_argument("--yolo_weights", required=True,
+                    help="Path to a YOLO26-nano checkpoint trained from scratch on SUN RGB-D "
+                         "(scripts/train_yolo_obstacle.py) -- no COCO-pretrained or other checkpoint")
     p.add_argument("--output", default="./out/navigation_demo.mp4")
     p.add_argument("--log_csv", default=None)
     p.add_argument("--device", default="cuda")

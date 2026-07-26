@@ -109,8 +109,10 @@ dan ke package `wheelchair_nav` sama-sama beres.
    `<path_rgb> <path_depth_npy>`. Jika hasil decode kebanyakan nol/aneh untuk sensor
    tertentu (variasi rilis dataset), coba `--depth_encoding raw_mm`.
 
-3. (Opsional, untuk fine-tuning YOLO26-nano di langkah 5) sekaligus konversi anotasi
-   2D SUN RGB-D jadi label YOLO **satu kelas** (`obstacle`), class-agnostic:
+3. **Wajib** untuk training YOLO26-nano di langkah 5: konversi anotasi 2D bawaan
+   SUN RGB-D sendiri (`annotation2Dfinal/index.json`) jadi label YOLO **satu kelas**
+   (`obstacle`), class-agnostic. **Ini satu-satunya dataset yang dipakai untuk
+   training deteksi obstacle** -- tidak ada dataset lain (COCO dsb.) yang dipakai:
 
    ```bash
    python -m wheelchair_nav.scripts.prepare_sunrgbd \
@@ -120,10 +122,19 @@ dan ke package `wheelchair_nav` sama-sama beres.
        --make_yolo_labels --yolo_out_dir ./data/sunrgbd_yolo
    ```
 
-   Format `annotation2Dfinal/index.json` sedikit berbeda antar rilis SUN RGB-D;
-   scene yang tidak cocok skema akan dilewati (bukan menghentikan seluruh proses).
-   Jika hasil konversi terlalu sedikit, langsung pakai opsi A di langkah 5
-   (fine-tune dari bobot COCO-pretrained) tanpa label SUN RGB-D.
+   Skema `annotation2Dfinal/index.json` yang dipakai (diverifikasi terhadap
+   *community parser* SUN RGB-D, mis. `Mask_RCNN-for-SUN-RGB-D`):
+   `frames[0]["polygon"][i] = {"x": [...], "y": [...], "object": idx}` dengan
+   `objects[idx]["name"]` sebagai nama kelas asli SUN RGB-D. Kelas permukaan ruangan
+   yang bukan obstacle fisik (`wall`, `floor`, `ceiling`, diatur lewat
+   `--exclude_classes`) dibuang -- kalau tidak, poligon dinding/lantai/langit-langit
+   akan jadi kotak nyaris satu-frame-penuh dan meracuni training. `--max_box_area_ratio`
+   (default `0.9`) jadi jaring pengaman kedua untuk poligon oversized lain yang lolos
+   dari filter nama kelas. Scene tanpa `annotation2Dfinal/` atau JSON yang tidak
+   valid dilewati dan dihitung (bukan diganti dataset lain).
+
+   Otomatis dibagi `train`/`val`/`test` (rasio sama dengan `--val_ratio`/`--test_ratio`)
+   ke `./data/sunrgbd_yolo/{images,labels}/{train,val,test}/` + `obstacle.yaml`.
 
 ---
 
@@ -207,11 +218,13 @@ Checkpoint tiap epoch + checkpoint terbaik (val L1 terendah) disimpan di
 
 ## 4. Hyperparameter tuning YOLO26-nano (Optuna, TPE sampler)
 
-Dijalankan **sebelum** fine-tuning penuh di langkah 5. Sama pola dengan langkah 2:
+Dijalankan **sebelum** training penuh di langkah 5. Sama pola dengan langkah 2:
 `scripts/tune_yolo_obstacle.py` memakai `optuna.Study` + `TPESampler`, tiap trial
-melakukan fine-tuning singkat (`--epochs_per_trial`) dari `--pretrained` pada
-`--data`, lalu diberi skor dari validation mAP50-95 (dimaksimalkan) -- dibaca dengan
-cara yang sama seperti `evaluation/eval_detection_metrics.py`.
+melatih **dari bobot acak** (`yolo26n.yaml`, bukan checkpoint pretrained apa pun)
+untuk beberapa epoch singkat (`--epochs_per_trial`) di atas `--data` (label SUN
+RGB-D dari langkah 1.3 -- satu-satunya dataset), lalu diberi skor dari validation
+mAP50-95 (dimaksimalkan) -- dibaca dengan cara yang sama seperti
+`evaluation/eval_detection_metrics.py`.
 
 Hyperparameter yang dicari: optimizer (`lr0`, `lrf`, `momentum`, `weight_decay`,
 `warmup_epochs`), bobot loss (`box`, `cls`), dan augmentasi (`hsv_h`, `hsv_s`, `hsv_v`,
@@ -220,7 +233,6 @@ Hyperparameter yang dicari: optimizer (`lr0`, `lrf`, `momentum`, `weight_decay`,
 ```bash
 python -m wheelchair_nav.scripts.tune_yolo_obstacle \
     --data ./data/sunrgbd_yolo/obstacle.yaml \
-    --pretrained yolo26n.pt \
     --n_trials 30 --epochs_per_trial 10 --imgsz 640 --batch 32 --device 0 \
     --out_json ./log_yolo/optuna_best_yolo_hparams.json
 ```
@@ -232,34 +244,34 @@ flag `--hparams_json` di langkah 5.
 
 ---
 
-## 5. Training / fine-tuning YOLO26-nano (deteksi bbox, class-agnostic)
+## 5. Training YOLO26-nano dari scratch (deteksi bbox, class-agnostic)
 
 YOLO26-nano dipakai **hanya** untuk bbox per obstacle; identitas kelas (nama objek)
 selalu dibuang di `perception/obstacle_detector.py`, jadi tidak perlu recognition
-nama objek. Dua opsi:
+nama objek. Training **selalu dari bobot acak** (`yolo26n.yaml`) di atas label SUN
+RGB-D dari langkah 1.3 -- **tidak ada dataset lain dan tidak ada checkpoint
+pretrained (COCO atau lainnya) yang dipakai**, konsisten dengan kebijakan "from
+scratch" yang sama dipakai RT-MonoDepth.
 
-**Opsi A (disarankan): fine-tune dari bobot COCO-pretrained, pakai hasil tuning langkah 4**
+Pakai hyperparameter hasil tuning langkah 4 lewat `--hparams_json`:
 
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
     --data ./data/sunrgbd_yolo/obstacle.yaml \
-    --pretrained yolo26n.pt \
-    --epochs 60 --imgsz 640 --batch 32 --device 0 \
+    --epochs 200 --imgsz 640 --batch 32 --device 0 \
     --hparams_json ./log_yolo/optuna_best_yolo_hparams.json
 ```
 
-**Opsi B: training dari bobot acak (tanpa COCO), tanpa hasil tuning**
+atau tanpa hasil tuning, set manual seperti biasa:
 
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
     --data ./data/sunrgbd_yolo/obstacle.yaml \
-    --pretrained "" --epochs 200 --imgsz 640 --batch 32 --device 0
+    --epochs 200 --imgsz 640 --batch 32 --device 0
 ```
 
-Bobot hasil training ada di `./log_yolo/obstacle_yolo26n/weights/best.pt`. Jika label
-SUN RGB-D dari langkah 1.3 terlalu sedikit/tidak tersedia, `yolo26n.pt`
-(COCO-pretrained) langsung bisa dipakai apa adanya di langkah 6 tanpa fine-tuning --
-sistem navigasi tetap berjalan class-agnostic karena nama kelas dibuang.
+Bobot hasil training ada di `./log_yolo/obstacle_yolo26n/weights/best.pt`, siap
+dipakai `--yolo_weights` di langkah 6.
 
 ---
 
@@ -283,8 +295,8 @@ Output:
   num_obstacles, min_depth_m, fps, FL0, L1, CTR2, R3, FR4`), dipakai evaluasi
   end-to-end di langkah 7.
 
-Tanpa `--yolo_weights` (default `yolo26n.pt`) sistem otomatis pakai bobot
-COCO-pretrained Ultralytics, cukup untuk demo cepat.
+`--yolo_weights` wajib diisi dengan checkpoint hasil langkah 5 (`.../weights/best.pt`)
+-- tidak ada fallback ke bobot COCO-pretrained di mana pun dalam sistem ini.
 
 ---
 
@@ -477,9 +489,13 @@ Semua threshold ada di `wheelchair_nav/config.py`:
   hanya menghasilkan simulated drive command (`linear_mps`, `angular_radps`) untuk
   logging/visualisasi; ganti isinya dengan driver motor sungguhan bila diintegrasikan
   ke perangkat keras.
-- Parsing anotasi 2D SUN RGB-D (`annotation2Dfinal/index.json`) bersifat best-effort
-  karena format sedikit berbeda antar rilis dataset; opsi fine-tuning YOLO26-nano
-  dari bobot COCO-pretrained (Opsi A langkah 5) tidak bergantung pada langkah ini.
+- Parsing anotasi 2D SUN RGB-D (`annotation2Dfinal/index.json`, langkah 1.3) adalah
+  **satu-satunya** sumber dataset untuk training YOLO26-nano -- tidak ada dataset
+  lain atau checkpoint pretrained (COCO atau lainnya) yang dipakai di mana pun
+  dalam sistem ini (training maupun `run_navigation.py`). Scene yang tidak punya
+  `annotation2Dfinal/` atau JSON-nya tidak valid dilewati dan dihitung, bukan
+  diganti sumber lain -- kalau jumlah scene yang berhasil dikonversi terlalu sedikit,
+  periksa `--sunrgbd_root` dan `--exclude_classes`, bukan beralih dataset.
 - Hyperparameter tuning (langkah 2, 4, dan 8b/8c) memakai Optuna dengan
   `TPESampler` (Bayesian, Tree-structured Parzen Estimator) dan budget epoch yang
   sengaja lebih kecil dari training penuh -- ini proxy search, bukan pengganti

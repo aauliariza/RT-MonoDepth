@@ -1,22 +1,17 @@
-"""Fine-tunes YOLO26-nano as a single-class, class-agnostic "obstacle"
-detector. RT-MonoDepth + the navigation logic only need bounding boxes --
-object identity is discarded downstream -- so every source class collapses
+"""Trains YOLO26-nano from scratch as a single-class, class-agnostic
+"obstacle" detector, on SUN RGB-D's own 2D bounding-box annotations
+converted by scripts/prepare_sunrgbd.py --make_yolo_labels
+(data/sunrgbd_yolo/obstacle.yaml) -- no other dataset and no pretrained
+checkpoint (COCO or otherwise) is used, matching the "from scratch" policy
+already used for RT-MonoDepth and the FastDepth/YOLO-depth baselines.
+RT-MonoDepth + the navigation logic only need bounding boxes -- object
+identity is discarded downstream -- so every SUN RGB-D class collapses
 into class 0 ("obstacle") both here (single_cls=True) and at inference
 time (perception/obstacle_detector.py just drops the class id).
 
-Two ways to get a usable detector:
-  1. (recommended) start from COCO-pretrained yolo26n.pt and fine-tune on
-     data/sunrgbd_yolo/obstacle.yaml (built by
-     scripts/prepare_sunrgbd.py --make_yolo_labels). Fast, robust, and
-     works even if SUN RGB-D's 2D box annotations only cover part of the
-     dataset on your particular download.
-  2. train yolo26n from random weights (--pretrained "") if you'd rather
-     not use any COCO weights; expect to need substantially more epochs
-     and data to converge.
-
 Usage:
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 60
+        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 200
 
 Hyperparameters found by scripts/tune_yolo_obstacle.py (Optuna, TPE
 sampler) can be applied directly with --hparams_json, which passes the
@@ -24,7 +19,7 @@ tuned optimizer/loss/augmentation values straight through to Ultralytics'
 train():
 
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 60 \
+        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
         --hparams_json ./log_yolo/optuna_best_yolo_hparams.json
 """
 from __future__ import annotations
@@ -38,9 +33,11 @@ from ultralytics import YOLO
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", default="./data/sunrgbd_yolo/obstacle.yaml")
-    p.add_argument("--pretrained", default="yolo26n.pt",
-                    help="Pretrained weights to start from, or '' to train from random init")
-    p.add_argument("--epochs", type=int, default=60)
+    p.add_argument("--pretrained", default="",
+                    help="Empty (default) trains from random init (yolo26n.yaml) -- no pretrained "
+                         "checkpoint is used. Only set this if you explicitly want to start from an "
+                         "existing checkpoint instead.")
+    p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=32)
     p.add_argument("--device", default="0")
