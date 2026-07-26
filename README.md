@@ -12,6 +12,11 @@ This is the reference PyTorch implementation for training and testing depth esti
 <img src="compare.png" width="50%">
 </div>
 
+> **Smart wheelchair indoor navigation demo:** an autonomous obstacle-avoidance
+> system built on top of this (unmodified) RT-MonoDepth model + YOLO26-nano lives in
+> [`wheelchair_nav/`](wheelchair_nav/README.md) -- SUN RGB-D training data prep,
+> training, video testing, and evaluation metrics are all documented there.
+
 
 
 

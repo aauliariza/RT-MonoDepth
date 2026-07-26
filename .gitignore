@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+# wheelchair_nav generated artifacts (datasets, checkpoints, outputs)
+data/
+splits_sunrgbd/
+log_sunrgbd/
+log_yolo/
+out/
+*.pt
+*.pth
