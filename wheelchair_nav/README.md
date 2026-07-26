@@ -35,10 +35,17 @@ wheelchair_nav/
     train_depth_sunrgbd.py           training RT-MonoDepth (full) from scratch
     tune_yolo_obstacle.py             Optuna-TPE hyperparameter search for YOLO26-nano
     train_yolo_obstacle.py           fine-tuning YOLO26-nano (class-agnostic)
+    tune_fastdepth_sunrgbd.py         Optuna-TPE hyperparameter search for FastDepth (baseline)
+    train_fastdepth_sunrgbd.py       training FastDepth (baseline) from scratch
+    tune_yolo_depth.py                Optuna-TPE hyperparameter search for YOLO26{n,s}-depth (baseline)
+    train_yolo_depth.py              training YOLO26n-depth / YOLO26s-depth (baseline)
   perception/
     depth_estimator.py                wrapper inferensi RT-MonoDepth (full, unmodified)
     obstacle_detector.py              wrapper YOLO26-nano (bbox saja, tanpa recognition)
     obstacle_list.py                  fusi bbox + depth map -> Obstacle List
+  baselines/                        model depth pembanding (apples-to-apples), lihat langkah 8
+    fastdepth_estimator.py            wrapper inferensi FastDepth (unmodified)
+    yolo_depth_estimator.py           wrapper inferensi YOLO26{n,s}-depth (unmodified)
   navigation/
     sectors.py                        partisi FOV jadi 5 sektor FL0..FR4
     free_path.py                      priority selection + hysteresis N=3
@@ -49,6 +56,8 @@ wheelchair_nav/
     eval_detection_metrics.py         mAP50/mAP50-95/precision/recall + params + FPS
     eval_navigation_metrics.py        FPS pipeline, missed/false-stop rate,
                                        decision accuracy, distance MAE/RMSE
+    eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs YOLO26{n,s}-depth,
+                                       metrik+params+FPS identik, test split identik
   requirements.txt
 ```
 
@@ -328,6 +337,124 @@ Opsional dengan ground truth:
 
 ---
 
+## 8. Model depth pembanding (apples-to-apples): FastDepth, YOLO26n-depth, YOLO26s-depth
+
+Untuk membandingkan RT-MonoDepth secara adil, tiga model depth lain dilatih **dari
+data yang persis sama** (`splits_sunrgbd/{train,val,test}.txt` dari langkah 1) dan
+dievaluasi dengan **formula metrik yang persis sama** (`abs_rel, sq_rel, rmse,
+rmse_log, a1, a2, a3`, identik dengan `evaluate_depth_full.py` di root repo):
+
+- **FastDepth** -- `networks/FastDepth/model.py` (`MobileNetSkipAdd`), **sudah ada di
+  repo ini tanpa diubah** (dipakai `compare_runtime.py` untuk benchmark runtime).
+  Output lapisan terakhirnya sudah ReLU (selalu >= 0); di sini hanya di-*clamp* ke
+  rentang metric yang sama dengan RT-MonoDepth, tanpa menambah lapisan baru.
+- **YOLO26n-depth** dan **YOLO26s-depth** -- arsitektur *native* Ultralytics untuk
+  monocular depth estimation (`ultralytics/cfg/models/26/yolo26-depth.yaml`, skala
+  `n`/`s`), **tidak diubah**. Training, loss (SILog + gradient), dan kalibrasi skala
+  metrik pasca-training sepenuhnya ditangani oleh trainer/validator bawaan
+  Ultralytics (`ultralytics.models.yolo.depth`) -- kode di sini hanya membungkusnya.
+
+Keempat model (RT-MonoDepth + 3 pembanding) tidak menyentuh
+`wheelchair_nav/perception/` maupun `run_navigation.py` -- RT-MonoDepth + YOLO26-nano
+detektor tetap satu-satunya stack yang dipakai sistem navigasi. `baselines/` dan
+skrip `*_fastdepth_*`/`*_yolo_depth_*` di atas murni untuk studi perbandingan.
+
+### 8a. Siapkan layout dataset yang identik untuk YOLO26{n,s}-depth
+
+`scripts/prepare_sunrgbd.py` (langkah 1) bisa langsung menge-*mirror* (symlink,
+tanpa duplikasi data) split train/val/test yang sama persis ke layout
+`images/{split}/*.jpg` + `depth/{split}/*.npy` yang dipakai native depth task
+Ultralytics:
+
+```bash
+python -m wheelchair_nav.scripts.prepare_sunrgbd \
+    --sunrgbd_root /path/to/SUNRGBD \
+    --out_dir ./data/sunrgbd_processed \
+    --splits_dir ./splits_sunrgbd \
+    --make_yolo_depth_layout --yolo_depth_out_dir ./data/sunrgbd_yolo_depth
+```
+
+Menghasilkan `./data/sunrgbd_yolo_depth/depth_comparison.yaml` (siap dipakai
+`--data` di langkah 8c/8d) -- gambar yang di dalamnya **sama persis** dengan yang
+dipakai RT-MonoDepth/FastDepth via `splits_sunrgbd/*.txt`.
+
+### 8b. FastDepth: tuning lalu training (sama pola dengan RT-MonoDepth)
+
+```bash
+# 1) Hyperparameter tuning (Optuna, TPE) -- ruang pencarian & protokol identik
+#    dengan tune_depth_sunrgbd.py (langkah 2), supaya kedua model di-tuning
+#    dengan cara yang sama:
+python -m wheelchair_nav.scripts.tune_fastdepth_sunrgbd \
+    --splits_dir ./splits_sunrgbd \
+    --height 192 --width 640 \
+    --n_trials 30 --epochs_per_trial 5 \
+    --out_json ./log_fastdepth/optuna_best_fastdepth_hparams.json \
+    --device cuda
+
+# 2) Training penuh, from scratch, pakai hasil tuning
+python -m wheelchair_nav.scripts.train_fastdepth_sunrgbd \
+    --splits_dir ./splits_sunrgbd \
+    --log_dir ./log_fastdepth \
+    --model_name FastDepth_sunrgbd \
+    --height 192 --width 640 \
+    --min_depth 0.1 --max_depth 10.0 \
+    --num_epochs 40 \
+    --hparams_json ./log_fastdepth/optuna_best_fastdepth_hparams.json
+```
+
+Checkpoint tersimpan di
+`./log_fastdepth/FastDepth_sunrgbd/models/{weights_N,best}/fastdepth.pth`.
+
+### 8c. YOLO26n-depth / YOLO26s-depth: tuning lalu training
+
+```bash
+# 1) Hyperparameter tuning (Optuna, TPE) -- optimizer + bobot loss depth
+#    (dlog: SILog gain, dgrad: gradient-loss gain, dlam: SILog scale-invariance
+#    focus) + augmentasi; skor = validation abs_rel (diminimalkan)
+python -m wheelchair_nav.scripts.tune_yolo_depth \
+    --variant n \
+    --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml \
+    --n_trials 30 --epochs_per_trial 10 --imgsz 640 --batch 16 --device 0 \
+    --out_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+
+# 2) Training penuh, pakai hasil tuning
+python -m wheelchair_nav.scripts.train_yolo_depth \
+    --variant n \
+    --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml \
+    --epochs 60 --imgsz 640 --batch 16 --device 0 \
+    --hparams_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+```
+
+Ganti `--variant n` menjadi `--variant s` untuk YOLO26s-depth (tuning dan training
+terpisah, sama perintah). Checkpoint tersimpan di
+`./log_yolo_depth/yolo26{n,s}_depth_sunrgbd/weights/best.pt` -- sudah otomatis
+dikalibrasi skala metriknya oleh Ultralytics di akhir training (log
+`"Auto-calibration written to best.pt"`).
+
+Default `--pretrained` memakai bobot `yolo26{n,s}-depth.pt` (pretrained Ultralytics)
+sebagai titik awal; pakai `--pretrained ""` untuk training dari bobot acak.
+
+### 8d. Jalankan perbandingan apples-to-apples
+
+```bash
+python -m wheelchair_nav.evaluation.eval_depth_comparison \
+    --test_list ./splits_sunrgbd/test.txt \
+    --rtmonodepth_weights_dir ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+    --fastdepth_weights_dir ./log_fastdepth/FastDepth_sunrgbd/models/best \
+    --yolo26n_depth_weights ./log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
+    --yolo26s_depth_weights ./log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
+    --device cuda \
+    --out_csv ./log_sunrgbd/depth_comparison.csv
+```
+
+Boleh isi hanya sebagian flag `--*_weights*` -- model yang tidak diberi bobotnya
+otomatis dilewati. Mencetak satu tabel berisi `abs_rel, sq_rel, rmse, rmse_log, a1,
+a2, a3, Params(M), FPS` untuk tiap model yang diberikan, dihitung di atas **gambar
+test yang sama** dan **rumus metrik yang sama** -- juga disimpan ke
+`--out_csv` bila diisi.
+
+---
+
 ## Konfigurasi
 
 Semua threshold ada di `wheelchair_nav/config.py`:
@@ -353,8 +480,11 @@ Semua threshold ada di `wheelchair_nav/config.py`:
 - Parsing anotasi 2D SUN RGB-D (`annotation2Dfinal/index.json`) bersifat best-effort
   karena format sedikit berbeda antar rilis dataset; opsi fine-tuning YOLO26-nano
   dari bobot COCO-pretrained (Opsi A langkah 5) tidak bergantung pada langkah ini.
-- Hyperparameter tuning (langkah 2 dan 4) memakai Optuna dengan `TPESampler`
-  (Bayesian, Tree-structured Parzen Estimator) dan budget epoch yang sengaja lebih
-  kecil dari training penuh -- ini proxy search, bukan pengganti training penuh;
-  hasil terbaiknya tetap perlu dilatih ulang dengan `--num_epochs`/`--epochs` penuh
-  di langkah 3/5.
+- Hyperparameter tuning (langkah 2, 4, dan 8b/8c) memakai Optuna dengan
+  `TPESampler` (Bayesian, Tree-structured Parzen Estimator) dan budget epoch yang
+  sengaja lebih kecil dari training penuh -- ini proxy search, bukan pengganti
+  training penuh; hasil terbaiknya tetap perlu dilatih ulang dengan
+  `--num_epochs`/`--epochs` penuh di langkah 3/5/8b/8c.
+- FastDepth, YOLO26n-depth, dan YOLO26s-depth (langkah 8) murni model pembanding
+  untuk studi evaluasi; sistem navigasi (`run_navigation.py`) tetap hanya memakai
+  RT-MonoDepth + YOLO26-nano detektor seperti dijelaskan di langkah 1-7.

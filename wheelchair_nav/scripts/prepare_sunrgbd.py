@@ -1,8 +1,13 @@
 """Preprocessing of the SUN RGB-D dataset (https://rgbd.cs.princeton.edu/)
 into the RGB / metric-depth pairs used to train RT-MonoDepth from scratch
-(wheelchair_nav/datasets/sunrgbd_dataset.py), and optionally into
-single-class ("obstacle") YOLO detection labels used to fine-tune
-YOLO26-nano.
+(wheelchair_nav/datasets/sunrgbd_dataset.py), and optionally into:
+  - single-class ("obstacle") YOLO detection labels used to fine-tune
+    YOLO26-nano (--make_yolo_labels);
+  - the images/{split}+depth/{split} layout Ultralytics' native depth task
+    expects, mirroring the exact same train/val/test split used for
+    RT-MonoDepth/FastDepth, so YOLO26n-depth/YOLO26s-depth can be trained
+    and compared apples-to-apples against RT-MonoDepth on identical images
+    (--make_yolo_depth_layout; see evaluation/eval_depth_comparison.py).
 
 SUN RGB-D ships as per-scene folders under kv1/, kv2/, realsense/ and
 xtion/, each containing image/*.jpg, depth_bfx/*.png (sensor-refined
@@ -20,7 +25,8 @@ Usage:
         --sunrgbd_root /path/to/SUNRGBD \
         --out_dir ./data/sunrgbd_processed \
         --splits_dir ./splits_sunrgbd \
-        --make_yolo_labels --yolo_out_dir ./data/sunrgbd_yolo
+        --make_yolo_labels --yolo_out_dir ./data/sunrgbd_yolo \
+        --make_yolo_depth_layout --yolo_depth_out_dir ./data/sunrgbd_yolo_depth
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ import glob
 import json
 import os
 import random
+import shutil
 
 import cv2
 import numpy as np
@@ -123,12 +130,15 @@ def process_depth(args):
     train_pairs = pairs[n_test + n_val:]
 
     os.makedirs(args.splits_dir, exist_ok=True)
-    for name, split in (("train", train_pairs), ("val", val_pairs), ("test", test_pairs)):
+    splits = {"train": train_pairs, "val": val_pairs, "test": test_pairs}
+    for name, split in splits.items():
         split_path = os.path.join(args.splits_dir, f"{name}.txt")
         with open(split_path, "w") as f:
             for rgb, depth in split:
                 f.write(f"{rgb} {depth}\n")
         print(f"  {name}: {len(split)} pairs -> {split_path}")
+
+    return splits
 
 
 def process_yolo_labels(args):
@@ -205,6 +215,55 @@ def process_yolo_labels(args):
     print(f"Wrote {yaml_path} (single class: obstacle)")
 
 
+def _link_or_copy(src: str, dst: str) -> None:
+    if os.path.exists(dst) or os.path.islink(dst):
+        return
+    try:
+        os.symlink(os.path.abspath(src), dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def process_yolo_depth_layout(args, splits: dict) -> None:
+    """Mirrors the exact train/val/test split used for RT-MonoDepth/FastDepth
+    into the images/{split} + depth/{split} layout Ultralytics' native depth
+    task expects (ultralytics/data/dataset.py pairs images/train/x.jpg with
+    depth/train/x.npy by swapping the last "images" path component), via
+    symlinks so no data is duplicated on disk. This gives YOLO26n-depth and
+    YOLO26s-depth literally the same images as RT-MonoDepth/FastDepth --
+    the basis for the apples-to-apples comparison in
+    evaluation/eval_depth_comparison.py.
+    """
+    out_dir = args.yolo_depth_out_dir
+    total = 0
+    for split_name, pairs in splits.items():
+        img_dir = os.path.join(out_dir, "images", split_name)
+        depth_dir = os.path.join(out_dir, "depth", split_name)
+        os.makedirs(img_dir, exist_ok=True)
+        os.makedirs(depth_dir, exist_ok=True)
+        for rgb_path, depth_path in pairs:
+            stem = os.path.splitext(os.path.basename(depth_path))[0]
+            ext = os.path.splitext(rgb_path)[1]
+            _link_or_copy(rgb_path, os.path.join(img_dir, f"{stem}{ext}"))
+            _link_or_copy(depth_path, os.path.join(depth_dir, f"{stem}.npy"))
+        total += len(pairs)
+
+    yaml_path = os.path.join(out_dir, "depth_comparison.yaml")
+    with open(yaml_path, "w") as f:
+        f.write(
+            f"path: {os.path.abspath(out_dir)}\n"
+            "train: images/train\n"
+            "val: images/val\n"
+            "test: images/test\n"
+            "nc: 1\n"
+            "names:\n"
+            "  0: depth\n"
+            "channels: 3\n"
+            f"max_depth: {args.max_depth}\n"
+        )
+    print(f"Wrote {yaml_path} ({total} images mirrored from {args.splits_dir})")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sunrgbd_root", required=True,
@@ -219,14 +278,22 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--make_yolo_labels", action="store_true")
     parser.add_argument("--yolo_out_dir", default="./data/sunrgbd_yolo")
+    parser.add_argument("--make_yolo_depth_layout", action="store_true",
+                         help="Also mirror the train/val/test split into the images/+depth/ layout "
+                              "used by YOLO26n-depth/YOLO26s-depth (baselines/yolo_depth_estimator.py)")
+    parser.add_argument("--yolo_depth_out_dir", default="./data/sunrgbd_yolo_depth")
+    parser.add_argument("--max_depth", type=float, default=10.0,
+                         help="Written into depth_comparison.yaml so DepthValidator's metric range matches")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    process_depth(args)
+    splits = process_depth(args)
     if args.make_yolo_labels:
         process_yolo_labels(args)
+    if args.make_yolo_depth_layout:
+        process_yolo_depth_layout(args, splits)
 
 
 if __name__ == "__main__":
