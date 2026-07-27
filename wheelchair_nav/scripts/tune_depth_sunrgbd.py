@@ -147,13 +147,13 @@ def parse_args():
     p.add_argument("--storage", default=None,
                     help="e.g. sqlite:///./log_sunrgbd/optuna_depth.db -- enables resuming/parallel trials")
     p.add_argument("--out_json", default="./log_sunrgbd/optuna_best_depth_hparams.json")
-    p.add_argument("--no_cuda", action="store_true")
+    p.add_argument("--device", default="cuda", help="'cuda' or 'cpu'")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    device = torch.device("cuda" if (torch.cuda.is_available() and not args.no_cuda) else "cpu")
+    device = torch.device(args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu")
     print(f"Tuning on {device} | {args.n_trials} trials x {args.epochs_per_trial} epochs each")
 
     sampler = optuna.samplers.TPESampler(seed=args.seed)

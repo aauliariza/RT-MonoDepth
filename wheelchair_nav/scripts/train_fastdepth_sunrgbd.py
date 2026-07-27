@@ -71,7 +71,7 @@ def parse_args():
     p.add_argument("--smoothness_weight", type=float, default=1e-3)
     p.add_argument("--si_lambda", type=float, default=0.5, help="scale-invariant log loss weight (Eigen et al.)")
     p.add_argument("--num_workers", type=int, default=8)
-    p.add_argument("--no_cuda", action="store_true")
+    p.add_argument("--device", default="cuda", help="'cuda' or 'cpu'")
     p.add_argument("--hparams_json", default=None,
                     help="JSON from tune_fastdepth_sunrgbd.py ({'best_params': {...}}); overrides "
                          "learning_rate/batch_size/smoothness_weight/si_lambda/weight_decay")
@@ -90,7 +90,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    device = torch.device("cuda" if (torch.cuda.is_available() and not args.no_cuda) else "cpu")
+    device = torch.device(args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu")
     print(f"Training on {device}")
 
     train_set = SUNRGBDDepthDataset(
