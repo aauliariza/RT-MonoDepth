@@ -132,6 +132,27 @@ def draw_overlay(frame, obstacles, decision, fps, sector_depths, safe_distance):
     return vis
 
 
+_VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".m4v")
+
+
+def ensure_video_extension(output_path: str) -> str:
+    """Appends .mp4 if --output has no recognized video extension.
+
+    A path with no (or an unrecognized) extension still gets a byte-for-byte
+    valid video written to it by OpenCV -- but Windows Explorer (and most
+    media players' file-association logic) only recognizes a video file by
+    its extension, so a working file named e.g. "navigation_demo" shows up
+    as a generic, unopenable "File" with no icon. This makes that class of
+    mistake impossible instead of documenting it.
+    """
+    if not output_path.lower().endswith(_VIDEO_EXTENSIONS):
+        fixed = output_path + ".mp4"
+        print(f"Warning: --output '{output_path}' has no video file extension; "
+              f"writing to '{fixed}' instead so your OS/player recognizes it.")
+        return fixed
+    return output_path
+
+
 def open_video_writer(output_path: str, fps: float, size: tuple):
     """Opens a cv2.VideoWriter, trying a few fourcc/container combinations.
 
@@ -188,6 +209,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    args.output = ensure_video_extension(args.output)
     out_dir = os.path.dirname(args.output) or "."
     os.makedirs(out_dir, exist_ok=True)
     log_csv = args.log_csv or os.path.splitext(args.output)[0] + "_log.csv"
