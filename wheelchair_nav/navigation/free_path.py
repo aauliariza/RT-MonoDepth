@@ -2,7 +2,12 @@
 
     Priority:  CTR > L > R > FL > FR > STOP
     Hysteresis: N=3 majority-vote window
-    Decision:  FORWARD | TURN_LEFT | TURN_RIGHT | STOP
+    Decision:  FORWARD | TURN_LEFT | TURN_RIGHT | TURN_FAR_LEFT | TURN_FAR_RIGHT | STOP
+
+Each sector maps to exactly one decision (config.SECTOR_TO_DECISION is a
+bijection), so DECISION_TO_SECTOR below can always recover which sector a
+final decision came from -- used by run_navigation.py to highlight the
+chosen path in the overlay.
 """
 from __future__ import annotations
 
@@ -16,6 +21,8 @@ from wheelchair_nav.config import (
     SECTOR_PRIORITY,
     SECTOR_TO_DECISION,
 )
+
+DECISION_TO_SECTOR = {decision: sector for sector, decision in SECTOR_TO_DECISION.items()}
 
 
 def select_raw_decision(sector_depths: Dict[str, float], safe_distance_m: float = SAFE_DISTANCE_M) -> str:

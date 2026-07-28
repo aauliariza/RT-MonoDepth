@@ -40,7 +40,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-DECISION_LABELS = ["FORWARD", "TURN_LEFT", "TURN_RIGHT", "STOP"]
+DECISION_LABELS = ["FORWARD", "TURN_LEFT", "TURN_RIGHT", "TURN_FAR_LEFT", "TURN_FAR_RIGHT", "STOP"]
 
 
 def load_nav_log(path):
@@ -163,10 +163,11 @@ def main():
     if args.gt_decisions:
         acc, confusion, n = decision_accuracy(rows, args.gt_decisions)
         print(f"\nDecision accuracy vs {args.gt_decisions}: {acc * 100:.2f}% over {n} labeled frames")
+        col_w = max(len(l) for l in DECISION_LABELS) + 2
         print("Confusion matrix (rows=ground truth, cols=predicted):")
-        print("            " + "".join(f"{l:>12}" for l in DECISION_LABELS))
+        print(" " * col_w + "".join(f"{l:>{col_w}}" for l in DECISION_LABELS))
         for a in DECISION_LABELS:
-            print(f"{a:>12}" + "".join(f"{confusion[a][b]:>12}" for b in DECISION_LABELS))
+            print(f"{a:>{col_w}}" + "".join(f"{confusion[a][b]:>{col_w}}" for b in DECISION_LABELS))
 
     if args.gt_distances:
         if not (args.video and args.depth_weights):

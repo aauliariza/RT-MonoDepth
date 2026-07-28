@@ -12,16 +12,22 @@ Perception:  frame -> RT-MonoDepth (depth_map, metres)
              -> Obstacle List: depth_m = median(depth_map[bbox_inner_ROI])
 
 Navigation:  Obstacle List -> Sector-Based Free-Path Selection
-             (FL0 | L1 | CTR2 | R3 | FR4, priority CTR>L>R>FL>FR>STOP,
+             (FL | L | CTR | R | FR, priority CTR>L>R>FL>FR>STOP,
               hysteresis N=3 majority vote)
-             -> Decision: FORWARD | TURN_LEFT | TURN_RIGHT | STOP
+             -> Decision: FORWARD | TURN_LEFT | TURN_RIGHT |
+                          TURN_FAR_LEFT | TURN_FAR_RIGHT | STOP
 ```
 
 Safety default: obstacle dengan jarak **< 1.0 m** (`SAFE_DISTANCE_M`, lihat
 `wheelchair_nav/config.py`) membuat sektor tersebut dianggap terhalang; sistem lalu
-memilih sektor bebas dengan prioritas tertinggi. Jika **tidak ada** sektor yang bebas,
-atau ada obstacle darurat (< 0.5 m, `EMERGENCY_DISTANCE_M`) di sektor manapun, sistem
-langsung **STOP** (bypass hysteresis, tanpa delay).
+memilih sektor bebas dengan prioritas tertinggi (`CTR > L > R > FL > FR`), masing-masing
+sektor memetakan ke decision-nya sendiri: `CTR->FORWARD`, `L->TURN_LEFT`,
+`R->TURN_RIGHT`, `FL->TURN_FAR_LEFT`, `FR->TURN_FAR_RIGHT`. Jika **tidak ada** sektor
+yang bebas, atau ada obstacle darurat (< 0.5 m, `EMERGENCY_DISTANCE_M`) di sektor
+manapun, sistem langsung **STOP** (bypass hysteresis, tanpa delay). Video output
+`run_navigation.py` mewarnai tiap sektor sesuai statusnya: **hijau** = sektor yang
+dipilih (jalur aman yang dilewati), **kuning/amber** = bebas tapi tidak dipilih
+(prioritas lebih rendah), **merah** = terhalang.
 
 ## Isi direktori
 
@@ -287,10 +293,17 @@ python -m wheelchair_nav.run_navigation \
 ```
 
 Output:
-- `./out/navigation_demo.mp4` -- video ber-anotasi: kotak bbox + label jarak
-  (`Depth: X.XXm`, merah jika < `safe_distance`), garis 5 sektor, banner
-  `Decision: FORWARD/TURN_LEFT/TURN_RIGHT/STOP`, FPS, dan *picture-in-picture*
-  peta depth berwarna (mirip visualisasi contoh di kiri).
+- `./out/navigation_demo.mp4` -- video **side-by-side** (RGB+overlay kiri, peta
+  depth berwarna kanan, ukuran sama, lebar video jadi 2x lebar input):
+  - Kotak bbox per obstacle + label jarak (`obstacle X.XXm`, merah jika
+    < `safe_distance`, hijau jika bebas).
+  - 5 sektor (`FL | L | CTR | R | FR`) diberi tint warna translucent sesuai
+    status: **hijau** = sektor yang dipilih (jalur yang dilewati), **kuning** =
+    bebas tapi tidak dipilih, **merah** = terhalang -- plus label sektor +
+    jarak (meter) di tengah tiap sektor.
+  - Banner bawah: decision (`FORWARD`/`TURN_LEFT`/`TURN_RIGHT`/
+    `TURN_FAR_LEFT`/`TURN_FAR_RIGHT`/`STOP`, warna sesuai jenis keputusan),
+    `OBS: X.XXm` (jarak obstacle terdekat di semua sektor), dan FPS.
 - `./out/navigation_demo_log.csv` -- log per-frame (`frame, decision,
   num_obstacles, min_depth_m, fps, FL0, L1, CTR2, R3, FR4`), dipakai evaluasi
   end-to-end di langkah 7.
@@ -478,6 +491,7 @@ Semua threshold ada di `wheelchair_nav/config.py`:
 | `MIN_DEPTH_M` / `MAX_DEPTH_M` | 0.1 / 10.0 | rentang depth metric indoor |
 | `BBOX_INNER_RATIO` | 0.6 | bbox di-*shrink* ke 60% tengah sebelum median depth |
 | `SECTOR_NAMES` | FL0,L1,CTR2,R3,FR4 | 5 sektor kiri->kanan |
+| `SECTOR_TO_DECISION` | CTR2->FORWARD, L1->TURN_LEFT, R3->TURN_RIGHT, FL0->TURN_FAR_LEFT, FR4->TURN_FAR_RIGHT | pemetaan sektor->decision (bijektif) |
 | `HYSTERESIS_WINDOW` | 3 | N frame majority-vote |
 
 ## Catatan / batasan

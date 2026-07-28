@@ -27,4 +27,10 @@ class WheelchairController:
             return DriveCommand(self.cruise_speed_mps * 0.4, self.turn_speed_radps, decision)
         if decision == "TURN_RIGHT":
             return DriveCommand(self.cruise_speed_mps * 0.4, -self.turn_speed_radps, decision)
+        if decision == "TURN_FAR_LEFT":
+            # Sharper evasive turn (obstacle forces a wider detour): slower
+            # forward speed, stronger angular rate than a plain TURN_LEFT.
+            return DriveCommand(self.cruise_speed_mps * 0.2, self.turn_speed_radps * 1.5, decision)
+        if decision == "TURN_FAR_RIGHT":
+            return DriveCommand(self.cruise_speed_mps * 0.2, -self.turn_speed_radps * 1.5, decision)
         return DriveCommand(0.0, 0.0, "STOP")

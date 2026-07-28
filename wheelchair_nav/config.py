@@ -27,14 +27,18 @@ BBOX_INNER_RATIO = 0.6  # shrink each bbox to its central 60% before taking the 
 
 # ---------------------------------------------------------------------------
 # Sector-Based Free-Path Selection (left -> right across the image)
+# Each of the 5 sectors maps to its own distinct decision (bijective), so the
+# chosen sector can always be recovered from the final decision alone (see
+# navigation/free_path.py's DECISION_TO_SECTOR).
 # ---------------------------------------------------------------------------
 SECTOR_NAMES = ["FL0", "L1", "CTR2", "R3", "FR4"]
 SECTOR_PRIORITY = ["CTR2", "L1", "R3", "FL0", "FR4"]
 SECTOR_TO_DECISION = {
-    "FL0": "TURN_LEFT",
+    "FL0": "TURN_FAR_LEFT",
     "L1": "TURN_LEFT",
     "CTR2": "FORWARD",
     "R3": "TURN_RIGHT",
-    "FR4": "TURN_RIGHT",
+    "FR4": "TURN_FAR_RIGHT",
 }
+DECISIONS = ["FORWARD", "TURN_LEFT", "TURN_RIGHT", "TURN_FAR_LEFT", "TURN_FAR_RIGHT", "STOP"]
 HYSTERESIS_WINDOW = 3  # N=3 majority-vote window

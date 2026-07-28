@@ -6,8 +6,11 @@ file:
     (priority CTR>L>R>FL>FR>STOP, N=3 hysteresis) -> Decision
     -> simulated wheelchair drive command.
 
-Writes an annotated output video (bboxes + per-obstacle distance, sector
-grid, decision banner, FPS, a depth-colormap picture-in-picture) plus a
+Writes an annotated output video: RGB (left) with per-obstacle bboxes +
+distance, the 5 sectors (FL|L|CTR|R|FR) tinted by status (green = the
+chosen free path, amber = free but not chosen, red = blocked), a bottom
+banner (decision, nearest-obstacle distance, FPS), concatenated side by
+side with the colorized depth map (right, same resolution) -- plus a
 per-frame CSV log used by evaluation/eval_navigation_metrics.py.
 
 Usage:
@@ -34,7 +37,7 @@ if _REPO_ROOT not in sys.path:
 
 from wheelchair_nav.config import SAFE_DISTANCE_M, SECTOR_NAMES  # noqa: E402
 from wheelchair_nav.navigation.controller import WheelchairController  # noqa: E402
-from wheelchair_nav.navigation.free_path import FreePathSelector  # noqa: E402
+from wheelchair_nav.navigation.free_path import DECISION_TO_SECTOR, FreePathSelector  # noqa: E402
 from wheelchair_nav.navigation.sectors import compute_sector_depths  # noqa: E402
 from wheelchair_nav.perception.depth_estimator import DepthEstimator  # noqa: E402
 from wheelchair_nav.perception.obstacle_detector import ObstacleDetector  # noqa: E402
@@ -42,37 +45,89 @@ from wheelchair_nav.perception.obstacle_list import build_obstacle_list  # noqa:
 
 DECISION_COLOR = {
     "FORWARD": (60, 200, 60),
-    "TURN_LEFT": (60, 170, 240),
-    "TURN_RIGHT": (60, 170, 240),
+    "TURN_LEFT": (220, 90, 220),
+    "TURN_RIGHT": (220, 90, 220),
+    "TURN_FAR_LEFT": (200, 60, 200),
+    "TURN_FAR_RIGHT": (200, 60, 200),
     "STOP": (40, 40, 220),
 }
+
+SECTOR_LABEL = {name: name.rstrip("0123456789") for name in SECTOR_NAMES}
+
+# BGR
+COLOR_BLOCKED = (0, 0, 220)     # red -- something inside is closer than the safety threshold
+COLOR_CHOSEN = (0, 200, 0)      # green -- this sector is free AND is the one the decision picked
+COLOR_FREE_ALT = (0, 200, 220)  # amber -- free, but a higher-priority sector was chosen instead
 
 
 def colorize_depth(depth_m: np.ndarray, max_depth: float) -> np.ndarray:
     norm = np.clip(depth_m / max_depth, 0.0, 1.0)
     gray = (norm * 255).astype(np.uint8)
-    return cv2.applyColorMap(255 - gray, cv2.COLORMAP_JET)
+    return cv2.applyColorMap(gray, cv2.COLORMAP_MAGMA)
 
 
-def draw_overlay(frame, obstacles, decision, fps, safe_distance):
+def draw_sector_overlay(vis, sector_depths, chosen_sector, safe_distance, alpha=0.35):
+    h, w = vis.shape[:2]
+    n = len(SECTOR_NAMES)
+    overlay = vis.copy()
+
+    for i, name in enumerate(SECTOR_NAMES):
+        x1, x2 = int(w * i / n), int(w * (i + 1) / n)
+        depth = sector_depths.get(name, float("inf"))
+        if depth < safe_distance:
+            color = COLOR_BLOCKED
+        elif name == chosen_sector:
+            color = COLOR_CHOSEN
+        else:
+            color = COLOR_FREE_ALT
+        cv2.rectangle(overlay, (x1, 0), (x2, h), color, -1)
+    cv2.addWeighted(overlay, alpha, vis, 1 - alpha, 0, dst=vis)
+
+    ty = h // 2
+    for i, name in enumerate(SECTOR_NAMES):
+        x1, x2 = int(w * i / n), int(w * (i + 1) / n)
+        cx = (x1 + x2) // 2
+        if i > 0:
+            cv2.line(vis, (x1, 0), (x1, h), (110, 110, 110), 1)
+
+        label = SECTOR_LABEL[name]
+        (lw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+        cv2.putText(vis, label, (cx - lw // 2, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+
+        depth = sector_depths.get(name, float("inf"))
+        depth_str = f"{depth:.2f}m" if np.isfinite(depth) else "inf"
+        (dw, _), _ = cv2.getTextSize(depth_str, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.putText(vis, depth_str, (cx - dw // 2, ty + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    return vis
+
+
+def draw_overlay(frame, obstacles, decision, fps, sector_depths, safe_distance):
     h, w = frame.shape[:2]
     vis = frame.copy()
 
-    for i in range(1, len(SECTOR_NAMES)):
-        x = int(w * i / len(SECTOR_NAMES))
-        cv2.line(vis, (x, 40), (x, h), (90, 90, 90), 1)
+    chosen_sector = DECISION_TO_SECTOR.get(decision)
+    draw_sector_overlay(vis, sector_depths, chosen_sector, safe_distance)
 
     for obs in obstacles:
         x1, y1, x2, y2 = obs.bbox
-        color = (0, 0, 255) if obs.depth_m < safe_distance else (0, 200, 0)
+        color = COLOR_BLOCKED if obs.depth_m < safe_distance else COLOR_CHOSEN
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(vis, f"Depth: {obs.depth_m:.2f}m", (x1, max(20, y1 - 8)),
+        cv2.putText(vis, f"obstacle {obs.depth_m:.2f}m", (x1, max(20, y1 - 8)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
+    min_depth = min(sector_depths.values()) if sector_depths else float("inf")
     banner_color = DECISION_COLOR.get(decision, (255, 255, 255))
-    cv2.rectangle(vis, (0, 0), (w, 40), (20, 20, 20), -1)
-    cv2.putText(vis, f"Decision: {decision}", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, banner_color, 2)
-    cv2.putText(vis, f"FPS: {fps:.1f}", (w - 150, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.rectangle(vis, (0, h - 40), (w, h), (20, 20, 20), -1)
+    cv2.putText(vis, decision, (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.8, banner_color, 2)
+
+    obs_str = f"OBS: {min_depth:.2f}m" if np.isfinite(min_depth) else "OBS: --"
+    (ow, _), _ = cv2.getTextSize(obs_str, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    cv2.putText(vis, obs_str, (w // 2 - ow // 2, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 220, 140), 2)
+
+    fps_str = f"{fps:.1f} FPS"
+    (fw, _), _ = cv2.getTextSize(fps_str, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    cv2.putText(vis, fps_str, (w - fw - 15, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     return vis
 
@@ -112,7 +167,9 @@ def main():
     fps_in = cap.get(cv2.CAP_PROP_FPS) or 30.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w, h))
+    # Side-by-side output: RGB+overlay (left) and colorized depth (right), same
+    # resolution, concatenated into one frame twice the input width.
+    writer = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w * 2, h))
 
     csv_file = open(log_csv, "w", newline="")
     csv_writer = csv.writer(csv_file)
@@ -120,7 +177,7 @@ def main():
 
     frame_idx = 0
     fps_ema = 0.0
-    stop_frames = turn_frames = forward_frames = 0
+    decision_counts = {}
 
     while True:
         ok, frame = cap.read()
@@ -140,16 +197,13 @@ def main():
         fps_ema = fps if frame_idx == 0 else 0.9 * fps_ema + 0.1 * fps
 
         min_depth = min(sector_depths.values()) if sector_depths else float("inf")
-        vis = draw_overlay(frame, obstacles, decision, fps_ema, args.safe_distance)
+        vis = draw_overlay(frame, obstacles, decision, fps_ema, sector_depths, args.safe_distance)
+        depth_vis = colorize_depth(depth_map, args.max_depth_vis)
+        combined = np.hstack([vis, depth_vis])
 
-        depth_thumb = colorize_depth(depth_map, args.max_depth_vis)
-        th, tw = h // 4, w // 4
-        depth_thumb = cv2.resize(depth_thumb, (tw, th))
-        vis[h - th:h, 0:tw] = depth_thumb
-
-        writer.write(vis)
+        writer.write(combined)
         if args.show:
-            cv2.imshow("wheelchair navigation", vis)
+            cv2.imshow("wheelchair navigation", combined)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
@@ -161,12 +215,7 @@ def main():
             f"{sector_depths[s]:.3f}" if np.isfinite(sector_depths[s]) else "inf" for s in SECTOR_NAMES
         ])
 
-        if decision == "STOP":
-            stop_frames += 1
-        elif decision == "FORWARD":
-            forward_frames += 1
-        else:
-            turn_frames += 1
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
         frame_idx += 1
 
     cap.release()
@@ -176,7 +225,7 @@ def main():
         cv2.destroyAllWindows()
 
     print(f"Processed {frame_idx} frames -> {args.output}")
-    print(f"  FORWARD: {forward_frames} | TURN: {turn_frames} | STOP: {stop_frames}")
+    print("  " + " | ".join(f"{d}: {n}" for d, n in sorted(decision_counts.items())))
     print(f"  Mean pipeline FPS: {fps_ema:.1f}")
     print(f"  Per-frame log: {log_csv}")
 
