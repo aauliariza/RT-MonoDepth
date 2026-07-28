@@ -132,6 +132,43 @@ def draw_overlay(frame, obstacles, decision, fps, sector_depths, safe_distance):
     return vis
 
 
+def open_video_writer(output_path: str, fps: float, size: tuple):
+    """Opens a cv2.VideoWriter, trying a few fourcc/container combinations.
+
+    cv2.VideoWriter fails *silently* when a codec isn't available: isOpened()
+    is False, but write() raises nothing and just does nothing, so a full run
+    can finish "successfully" while producing a 0-byte or otherwise corrupt,
+    unplayable file -- no traceback, no error, just a bad file. This checks
+    isOpened() explicitly and falls back to more widely-supported codecs
+    before giving up with an actionable error.
+    """
+    candidates = [
+        (output_path, "mp4v"),
+        (output_path, "avc1"),
+        (os.path.splitext(output_path)[0] + ".avi", "MJPG"),
+        (os.path.splitext(output_path)[0] + ".avi", "XVID"),
+    ]
+    for path, fourcc_name in candidates:
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*fourcc_name), fps, size)
+        if writer.isOpened():
+            if path != output_path:
+                print(f"Warning: could not open '{output_path}' with any MP4 codec on this "
+                      f"OpenCV build; writing '{fourcc_name}' to '{path}' instead.")
+            return writer, path
+        writer.release()
+
+    raise SystemExit(
+        "Could not open a video writer with any of the tried codecs "
+        f"({[c[1] for c in candidates]}). This means your OpenCV build has no working codec "
+        "backend for video writing (check with: python3 -c \"import cv2; "
+        "print(cv2.getBuildInformation())\" | grep -i ffmpeg -- it should say YES). Fix by "
+        "installing an OpenCV build with FFmpeg support, e.g.:\n"
+        "  pip uninstall -y opencv-python opencv-python-headless && pip install opencv-python\n"
+        "or, if that still fails:\n"
+        "  conda install -c conda-forge opencv"
+    )
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--video", required=True)
@@ -169,7 +206,7 @@ def main():
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     # Side-by-side output: RGB+overlay (left) and colorized depth (right), same
     # resolution, concatenated into one frame twice the input width.
-    writer = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w * 2, h))
+    writer, output_path = open_video_writer(args.output, fps_in, (w * 2, h))
 
     csv_file = open(log_csv, "w", newline="")
     csv_writer = csv.writer(csv_file)
@@ -224,7 +261,7 @@ def main():
     if args.show:
         cv2.destroyAllWindows()
 
-    print(f"Processed {frame_idx} frames -> {args.output}")
+    print(f"Processed {frame_idx} frames -> {output_path}")
     print("  " + " | ".join(f"{d}: {n}" for d, n in sorted(decision_counts.items())))
     print(f"  Mean pipeline FPS: {fps_ema:.1f}")
     print(f"  Per-frame log: {log_csv}")
