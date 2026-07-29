@@ -1,0 +1,15 @@
+{
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+    "data",
+    "SUNRGBD",
+    "splits_sunrgbd",
+    "log_sunrgbd",
+    "log_fastdepth",
+    "log_yolo",
+    "log_yolo_depth",
+    "out"
+  ]
+}
