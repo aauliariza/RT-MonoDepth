@@ -10,6 +10,8 @@
     "log_fastdepth",
     "log_yolo",
     "log_yolo_depth",
-    "out"
+    "out",
+    "runs",
+    "Other Project Artefact"
   ]
 }
