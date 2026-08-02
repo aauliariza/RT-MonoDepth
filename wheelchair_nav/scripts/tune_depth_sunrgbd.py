@@ -34,16 +34,16 @@ import sys
 import optuna
 import torch
 from torch.utils.data import DataLoader
+from types import SimpleNamespace
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from layers import disp_to_depth, get_smooth_loss  # noqa: E402  (repo root, unmodified)
 from networks.RTMonoDepth.RTMonoDepth import DepthDecoder, DepthEncoder  # noqa: E402  (repo root, unmodified)
 
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
-from wheelchair_nav.scripts.train_depth_sunrgbd import masked_l1, scale_invariant_log_loss  # noqa: E402
+from wheelchair_nav.scripts.train_depth_sunrgbd import compute_multiscale_loss, disp_to_depth, masked_l1  # noqa: E402
 
 
 def build_loaders(args, batch_size: int):
@@ -81,7 +81,16 @@ def objective_factory(args, device: torch.device):
         encoder = DepthEncoder().to(device)
         decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(device)
         params = list(encoder.parameters()) + list(decoder.parameters())
-        optimizer = torch.optim.Adam(params, lr=learning_rate, weight_decay=weight_decay)
+        optimizer = torch.optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay)
+
+        # Same loss compute_multiscale_loss() uses in train_depth_sunrgbd.py
+        # (all 4 decoder scales, mean-normalized smoothness) -- otherwise a
+        # trial would be scored under a different objective than the one
+        # the tuned hyperparameters actually get used for.
+        loss_args = SimpleNamespace(
+            min_depth=args.min_depth, max_depth=args.max_depth,
+            si_lambda=si_lambda, smoothness_weight=smoothness_weight,
+        )
 
         val_loss = float("inf")
         for epoch in range(args.epochs_per_trial):
@@ -93,14 +102,7 @@ def objective_factory(args, device: torch.device):
                 valid = batch["valid_mask"].to(device)
 
                 outputs = decoder(encoder(color))
-                disp = outputs[("disp", 0)]
-                _, depth_pred = disp_to_depth(disp, args.min_depth, args.max_depth)
-
-                loss = (
-                    masked_l1(depth_pred, depth_gt, valid)
-                    + scale_invariant_log_loss(depth_pred, depth_gt, valid, lam=si_lambda)
-                    + smoothness_weight * get_smooth_loss(disp, color)
-                )
+                loss = compute_multiscale_loss(outputs, color, depth_gt, valid, loss_args)
 
                 optimizer.zero_grad()
                 loss.backward()

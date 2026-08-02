@@ -189,6 +189,23 @@ ber-pose), memakai loss masked-L1 + scale-invariant log (Eigen) + smoothness (re
 `layers.get_smooth_loss`, tidak dimodifikasi). Bobot diinisialisasi acak (Kaiming
 init bawaan kelasnya) -- **tidak ada checkpoint pretrained yang dimuat**.
 
+Selain objektifnya (supervised vs self-supervised), resep training di sini mengikuti
+`trainer.py` semirip mungkin, supaya tidak ada bagian arsitektur yang mubazir/kurang
+optimal:
+- **Multi-scale**: `DepthDecoder` menghasilkan 4 skala output (`disp 0-3`); loss
+  dihitung di keempatnya (GT depth/mask/color di-*downsample* ke resolusi tiap skala),
+  bukan cuma skala 0 -- kalau tidak, 3 dari 4 *head* dispconv tidak pernah menerima
+  gradien sama sekali.
+- **Smoothness dengan normalisasi mean-disparity**: `disp / mean(disp)` sebelum
+  dihitung `get_smooth_loss`, sama seperti `trainer.py` -- tanpa ini, loss smoothness
+  bisa "dicurangi" cukup dengan memperkecil disparitas secara keseluruhan, bukan
+  benar-benar menghaluskannya.
+- **Optimizer AdamW** (bukan Adam) -- match `trainer.py`, penting terutama saat
+  `--weight_decay` > 0 dari hasil tuning.
+- **Augmentasi warna** (`ColorJitter`, brightness/contrast/saturation/hue) pada data
+  training, selain flip horizontal -- meniru `color_aug` di `trainer.py`, membantu
+  ketahanan terhadap variasi pencahayaan kamera di dunia nyata.
+
 Pakai hyperparameter hasil tuning langkah 2 langsung lewat `--hparams_json` (meng-*override*
 `--learning_rate`/`--batch_size`/`--smoothness_weight`/`--si_lambda`/`--weight_decay`):
 

@@ -13,6 +13,16 @@ that ground truth with a masked L1 + scale-invariant log loss (Eigen et
 al.) plus the repo's own edge-aware smoothness term. Only the training
 objective is new; DepthEncoder/DepthDecoder are imported unchanged.
 
+Everything else follows trainer.py's recipe as closely as a supervised
+objective allows, so DepthDecoder's 4 output scales all get a training
+signal instead of just scale 0: the loss is computed at every scale
+(1, 1/2, 1/4, 1/8 resolution, matching trainer.py's num_scales averaging),
+GT depth/mask/color are downsampled to each scale with the decoder's own
+resolution, and the smoothness term uses trainer.py's mean-normalized
+disparity (disp / mean(disp)) weighted by 1/2**scale -- without that
+normalization the smoothness term can be minimized degenerately by
+shrinking disparity overall rather than by actually smoothing it.
+
 Usage:
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
         --splits_dir ./splits_sunrgbd --num_epochs 40 --batch_size 16
@@ -35,6 +45,7 @@ import sys
 import time
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -59,6 +70,48 @@ def scale_invariant_log_loss(pred: torch.Tensor, gt: torch.Tensor, mask: torch.T
     term1 = (diff ** 2).sum() / n
     term2 = (diff.sum() / n) ** 2
     return term1 - lam * term2
+
+
+def compute_multiscale_loss(
+    outputs: dict, color: torch.Tensor, depth_gt: torch.Tensor, valid: torch.Tensor, args,
+) -> torch.Tensor:
+    """Masked L1 + scale-invariant log loss + edge-aware smoothness, summed
+    over all 4 DepthDecoder scales and averaged (mirrors trainer.py's
+    `total_loss /= self.num_scales`), instead of only supervising scale 0.
+    GT depth/mask/color are downsampled (nearest for depth/mask so no
+    invalid pixel leaks into a neighbor; bilinear for color) to each
+    scale's own resolution rather than upsampling the prediction, so the
+    loss is always evaluated at the resolution the decoder head actually
+    produced.
+    """
+    scales = sorted(s for (_, s) in outputs.keys())
+    total = 0.0
+
+    for scale in scales:
+        disp = outputs[("disp", scale)]
+        _, depth_pred = disp_to_depth(disp, args.min_depth, args.max_depth)
+
+        size = disp.shape[-2:]
+        if size == depth_gt.shape[-2:]:
+            depth_gt_s, valid_s, color_s = depth_gt, valid, color
+        else:
+            depth_gt_s = F.interpolate(depth_gt, size=size, mode="nearest")
+            valid_s = F.interpolate(valid, size=size, mode="nearest")
+            color_s = F.interpolate(color, size=size, mode="bilinear", align_corners=False)
+
+        # trainer.py's mean-normalized disparity: without this, the
+        # smoothness term can be minimized by shrinking disparity overall
+        # instead of by actually smoothing it.
+        mean_disp = disp.mean(2, keepdim=True).mean(3, keepdim=True)
+        norm_disp = disp / (mean_disp + 1e-7)
+
+        total = total + (
+            masked_l1(depth_pred, depth_gt_s, valid_s)
+            + scale_invariant_log_loss(depth_pred, depth_gt_s, valid_s, lam=args.si_lambda)
+            + args.smoothness_weight * get_smooth_loss(norm_disp, color_s) / (2 ** scale)
+        )
+
+    return total / len(scales)
 
 
 def save_models(save_dir: str, encoder: DepthEncoder, decoder: DepthDecoder, height: int, width: int) -> None:
@@ -135,7 +188,7 @@ def main():
     decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(device)
 
     params = list(encoder.parameters()) + list(decoder.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.learning_rate, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(params, lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
 
     save_root = os.path.join(args.log_dir, args.model_name, "models")
@@ -153,14 +206,7 @@ def main():
             valid = batch["valid_mask"].to(device)
 
             outputs = decoder(encoder(color))
-            disp = outputs[("disp", 0)]
-            _, depth_pred = disp_to_depth(disp, args.min_depth, args.max_depth)
-
-            loss = (
-                masked_l1(depth_pred, depth_gt, valid)
-                + scale_invariant_log_loss(depth_pred, depth_gt, valid, lam=args.si_lambda)
-                + args.smoothness_weight * get_smooth_loss(disp, color)
-            )
+            loss = compute_multiscale_loss(outputs, color, depth_gt, valid, args)
 
             optimizer.zero_grad()
             loss.backward()

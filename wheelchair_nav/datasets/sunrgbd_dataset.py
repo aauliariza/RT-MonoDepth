@@ -14,7 +14,9 @@ from typing import List, Tuple
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 from torch.utils.data import Dataset
+from torchvision import transforms
 
 
 def _read_split(list_path: str) -> List[Tuple[str, str]]:
@@ -50,6 +52,15 @@ class SUNRGBDDepthDataset(Dataset):
         self.max_depth = max_depth
         self.is_train = is_train
 
+        # Same brightness/contrast/saturation/hue ranges trainer.py's
+        # color_aug uses for KITTI -- only the depth objective changed
+        # (see module docstring), photometric augmentation is unaffected
+        # by that and is just as useful here for robustness to the
+        # wheelchair camera's real-world lighting variation.
+        self.color_jitter = transforms.ColorJitter(
+            brightness=(0.8, 1.2), contrast=(0.8, 1.2), saturation=(0.8, 1.2), hue=(-0.1, 0.1),
+        )
+
     def __len__(self) -> int:
         return len(self.pairs)
 
@@ -68,6 +79,9 @@ class SUNRGBDDepthDataset(Dataset):
         if self.is_train and np.random.rand() > 0.5:
             img = np.ascontiguousarray(img[:, ::-1, :])
             depth = np.ascontiguousarray(depth[:, ::-1])
+
+        if self.is_train:
+            img = np.array(self.color_jitter(Image.fromarray(img)))
 
         valid = (depth > self.min_depth) & (depth < self.max_depth)
         depth_clipped = np.clip(depth, self.min_depth, self.max_depth)
