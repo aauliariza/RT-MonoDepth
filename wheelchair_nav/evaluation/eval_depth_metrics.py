@@ -5,8 +5,8 @@ in the repo root for KITTI), parameter count, and inference FPS.
 
 Usage:
     python -m wheelchair_nav.evaluation.eval_depth_metrics \
-        --weights_dir ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-        --test_list ./splits_sunrgbd/test.txt
+        --weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+        --test_list ./wheelchair_nav/splits_sunrgbd/test.txt
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def compute_errors(gt: np.ndarray, pred: np.ndarray):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights_dir", required=True, help="Folder with encoder.pth + depth.pth")
-    p.add_argument("--test_list", default="./splits_sunrgbd/test.txt")
+    p.add_argument("--test_list", default="./wheelchair_nav/splits_sunrgbd/test.txt")
     p.add_argument("--min_depth", type=float, default=0.1)
     p.add_argument("--max_depth", type=float, default=10.0)
     p.add_argument("--device", default="cuda")

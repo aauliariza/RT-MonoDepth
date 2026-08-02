@@ -16,13 +16,13 @@ directly onto train_depth_sunrgbd.py's CLI flags, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./splits_sunrgbd --num_epochs 40 \
-        --hparams_json ./log_sunrgbd/optuna_best_depth_hparams.json
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 \
+        --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 
 Usage:
     python -m wheelchair_nav.scripts.tune_depth_sunrgbd \
-        --splits_dir ./splits_sunrgbd --n_trials 30 --epochs_per_trial 5 \
-        --out_json ./log_sunrgbd/optuna_best_depth_hparams.json
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --n_trials 30 --epochs_per_trial 5 \
+        --out_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def objective_factory(args, device: torch.device):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--splits_dir", default="./splits_sunrgbd")
+    p.add_argument("--splits_dir", default="./wheelchair_nav/splits_sunrgbd")
     p.add_argument("--height", type=int, default=192)
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--min_depth", type=float, default=0.1)
@@ -147,8 +147,8 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--study_name", default="rtmonodepth_sunrgbd_tpe")
     p.add_argument("--storage", default=None,
-                    help="e.g. sqlite:///./log_sunrgbd/optuna_depth.db -- enables resuming/parallel trials")
-    p.add_argument("--out_json", default="./log_sunrgbd/optuna_best_depth_hparams.json")
+                    help="e.g. sqlite:///./wheelchair_nav/log_sunrgbd/optuna_depth.db -- enables resuming/parallel trials")
+    p.add_argument("--out_json", default="./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json")
     p.add_argument("--device", default="cuda", help="'cuda' or 'cpu'")
     return p.parse_args()
 

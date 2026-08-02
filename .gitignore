@@ -2,18 +2,18 @@ __pycache__/
 *.pyc
 
 # wheelchair_nav generated artifacts (datasets, checkpoints, outputs)
-data/
-splits_sunrgbd/
-log_sunrgbd/
-log_fastdepth/
-log_yolo/
-log_yolo_depth/
-out/
-runs/
+wheelchair_nav/data/
+wheelchair_nav/splits_sunrgbd/
+wheelchair_nav/log_sunrgbd/
+wheelchair_nav/log_fastdepth/
+wheelchair_nav/log_yolo/
+wheelchair_nav/log_yolo_depth/
+wheelchair_nav/out/
+wheelchair_nav/runs/
 *.pt
 *.pth
 
-# raw downloaded/extracted dataset
+# raw downloaded/extracted dataset (manually downloaded, not code-generated)
 SUNRGBD/
 SUNRGBD.zip
 *.mat

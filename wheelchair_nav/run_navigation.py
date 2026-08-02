@@ -24,25 +24,25 @@ Usage (RT-MonoDepth, default):
     python -m wheelchair_nav.run_navigation \
         --video path/to/input.mp4 \
         --depth_model rtmonodepth \
-        --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-        --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-        --output ./out/navigation_demo.mp4
+        --depth_weights ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+        --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+        --output ./wheelchair_nav/out/navigation_demo.mp4
 
 Usage (FastDepth):
     python -m wheelchair_nav.run_navigation \
         --video path/to/input.mp4 \
         --depth_model fastdepth \
-        --depth_weights ./log_fastdepth/FastDepth_sunrgbd/models/best \
-        --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-        --output ./out/navigation_demo_fastdepth.mp4
+        --depth_weights ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+        --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+        --output ./wheelchair_nav/out/navigation_demo_fastdepth.mp4
 
 Usage (YOLO26n-depth / YOLO26s-depth):
     python -m wheelchair_nav.run_navigation \
         --video path/to/input.mp4 \
         --depth_model yolo26n-depth \
-        --depth_weights ./log_yolo_depth/yolo26n_depth/weights/best.pt \
-        --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-        --output ./out/navigation_demo_yolo26n_depth.mp4
+        --depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth/weights/best.pt \
+        --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+        --output ./wheelchair_nav/out/navigation_demo_yolo26n_depth.mp4
 """
 from __future__ import annotations
 
@@ -262,7 +262,7 @@ def parse_args():
     p.add_argument("--yolo_weights", required=True,
                     help="Path to a YOLO26-nano checkpoint trained from scratch on SUN RGB-D "
                          "(scripts/train_yolo_obstacle.py) -- no COCO-pretrained or other checkpoint")
-    p.add_argument("--output", default="./out/navigation_demo.mp4")
+    p.add_argument("--output", default="./wheelchair_nav/out/navigation_demo.mp4")
     p.add_argument("--log_csv", default=None)
     p.add_argument("--device", default="cuda")
     p.add_argument("--safe_distance", type=float, default=SAFE_DISTANCE_M)

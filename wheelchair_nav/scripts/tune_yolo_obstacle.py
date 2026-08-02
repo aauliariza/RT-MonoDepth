@@ -19,14 +19,14 @@ directly onto Ultralytics' model.train() kwargs, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
-        --hparams_json ./log_yolo/optuna_best_yolo_hparams.json
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
+        --hparams_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 
 Usage:
     python -m wheelchair_nav.scripts.tune_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml \
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
         --n_trials 30 --epochs_per_trial 10 \
-        --out_json ./log_yolo/optuna_best_yolo_hparams.json
+        --out_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def objective_factory(args):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", default="./data/sunrgbd_yolo/obstacle.yaml")
+    p.add_argument("--data", default="./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml")
     p.add_argument("--pretrained", default="",
                     help="Empty (default) starts each trial from random init (yolo26n.yaml) -- no "
                          "pretrained checkpoint is used")
@@ -98,10 +98,10 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--study_name", default="yolo26n_obstacle_tpe")
     p.add_argument("--storage", default=None,
-                    help="e.g. sqlite:///./log_yolo/optuna_yolo.db -- enables resuming/parallel trials")
-    p.add_argument("--tune_project", default="./log_yolo/optuna_tuning",
+                    help="e.g. sqlite:///./wheelchair_nav/log_yolo/optuna_yolo.db -- enables resuming/parallel trials")
+    p.add_argument("--tune_project", default="./wheelchair_nav/log_yolo/optuna_tuning",
                     help="Each trial's Ultralytics run artifacts are written under here")
-    p.add_argument("--out_json", default="./log_yolo/optuna_best_yolo_hparams.json")
+    p.add_argument("--out_json", default="./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json")
     return p.parse_args()
 
 

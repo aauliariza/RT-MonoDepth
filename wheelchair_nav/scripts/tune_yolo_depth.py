@@ -17,14 +17,14 @@ directly onto Ultralytics' model.train() kwargs, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_yolo_depth \
-        --variant n --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml --epochs 60 \
-        --hparams_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml --epochs 60 \
+        --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 
 Usage:
     python -m wheelchair_nav.scripts.tune_yolo_depth \
-        --variant n --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml \
+        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
         --n_trials 30 --epochs_per_trial 10 \
-        --out_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+        --out_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def objective_factory(args):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--variant", choices=["n", "s"], default="n", help="YOLO26 scale: n (nano) or s (small)")
-    p.add_argument("--data", default="./data/sunrgbd_yolo_depth/depth_comparison.yaml")
+    p.add_argument("--data", default="./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml")
     p.add_argument("--pretrained", default="",
                     help="Empty (default) trains each trial from random init "
                          "(yolo26{variant}-depth.yaml) -- no pretrained checkpoint is used unless "
@@ -98,17 +98,17 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--study_name", default=None, help="default: yolo26{variant}_depth_tpe")
     p.add_argument("--storage", default=None,
-                    help="e.g. sqlite:///./log_yolo_depth/optuna_yolo_depth.db -- enables resuming/parallel trials")
-    p.add_argument("--tune_project", default="./log_yolo_depth/optuna_tuning",
+                    help="e.g. sqlite:///./wheelchair_nav/log_yolo_depth/optuna_yolo_depth.db -- enables resuming/parallel trials")
+    p.add_argument("--tune_project", default="./wheelchair_nav/log_yolo_depth/optuna_tuning",
                     help="Each trial's Ultralytics run artifacts are written under here")
-    p.add_argument("--out_json", default=None, help="default: ./log_yolo_depth/optuna_best_yolo26{variant}_depth_hparams.json")
+    p.add_argument("--out_json", default=None, help="default: ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26{variant}_depth_hparams.json")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     study_name = args.study_name or f"yolo26{args.variant}_depth_tpe"
-    out_json = args.out_json or f"./log_yolo_depth/optuna_best_yolo26{args.variant}_depth_hparams.json"
+    out_json = args.out_json or f"./wheelchair_nav/log_yolo_depth/optuna_best_yolo26{args.variant}_depth_hparams.json"
     print(f"Tuning {args.n_trials} trials x {args.epochs_per_trial} epochs each on device={args.device}")
 
     sampler = optuna.samplers.TPESampler(seed=args.seed)

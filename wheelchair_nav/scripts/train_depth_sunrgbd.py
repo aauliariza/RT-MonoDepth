@@ -25,7 +25,7 @@ shrinking disparity overall rather than by actually smoothing it.
 
 Usage:
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./splits_sunrgbd --num_epochs 40 --batch_size 16
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 --batch_size 16
 
 Hyperparameters found by scripts/tune_depth_sunrgbd.py (Optuna, TPE
 sampler) can be applied directly with --hparams_json, which overrides
@@ -33,8 +33,8 @@ sampler) can be applied directly with --hparams_json, which overrides
 with the tuned values before training starts:
 
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./splits_sunrgbd --num_epochs 40 \
-        --hparams_json ./log_sunrgbd/optuna_best_depth_hparams.json
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 \
+        --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 """
 from __future__ import annotations
 
@@ -125,8 +125,8 @@ def save_models(save_dir: str, encoder: DepthEncoder, decoder: DepthDecoder, hei
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--splits_dir", default="./splits_sunrgbd")
-    p.add_argument("--log_dir", default="./log_sunrgbd")
+    p.add_argument("--splits_dir", default="./wheelchair_nav/splits_sunrgbd")
+    p.add_argument("--log_dir", default="./wheelchair_nav/log_sunrgbd")
     p.add_argument("--model_name", default="RTMonoDepth_sunrgbd")
     p.add_argument("--height", type=int, default=192)
     p.add_argument("--width", type=int, default=640)

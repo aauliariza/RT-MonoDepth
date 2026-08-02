@@ -20,12 +20,12 @@ whose weights flag is omitted is skipped.
 
 Usage:
     python -m wheelchair_nav.evaluation.eval_depth_comparison \
-        --test_list ./splits_sunrgbd/test.txt \
-        --rtmonodepth_weights_dir ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-        --fastdepth_weights_dir ./log_fastdepth/FastDepth_sunrgbd/models/best \
-        --yolo26n_depth_weights ./log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
-        --yolo26s_depth_weights ./log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
-        --out_csv ./log_sunrgbd/depth_comparison.csv
+        --test_list ./wheelchair_nav/splits_sunrgbd/test.txt \
+        --rtmonodepth_weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+        --fastdepth_weights_dir ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+        --yolo26n_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
+        --yolo26s_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
+        --out_csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv
 """
 from __future__ import annotations
 
@@ -192,7 +192,7 @@ def print_table(rows):
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--test_list", default="./splits_sunrgbd/test.txt")
+    p.add_argument("--test_list", default="./wheelchair_nav/splits_sunrgbd/test.txt")
     p.add_argument("--rtmonodepth_weights_dir", default=None)
     p.add_argument("--fastdepth_weights_dir", default=None)
     p.add_argument("--yolo26n_depth_weights", default=None)

@@ -11,7 +11,7 @@ time (perception/obstacle_detector.py just drops the class id).
 
 Usage:
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 200
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml --epochs 200
 
 Hyperparameters found by scripts/tune_yolo_obstacle.py (Optuna, TPE
 sampler) can be applied directly with --hparams_json, which passes the
@@ -19,8 +19,8 @@ tuned optimizer/loss/augmentation values straight through to Ultralytics'
 train():
 
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
-        --hparams_json ./log_yolo/optuna_best_yolo_hparams.json
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
+        --hparams_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from ultralytics import YOLO
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", default="./data/sunrgbd_yolo/obstacle.yaml")
+    p.add_argument("--data", default="./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml")
     p.add_argument("--pretrained", default="",
                     help="Empty (default) trains from random init (yolo26n.yaml) -- no pretrained "
                          "checkpoint is used. Only set this if you explicitly want to start from an "
@@ -41,7 +41,7 @@ def parse_args():
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=32)
     p.add_argument("--device", default="0")
-    p.add_argument("--project", default="./log_yolo")
+    p.add_argument("--project", default="./wheelchair_nav/log_yolo")
     p.add_argument("--name", default="obstacle_yolo26n")
     p.add_argument("--hparams_json", default=None,
                     help="JSON from tune_yolo_obstacle.py ({'best_params': {...}}); its keys "

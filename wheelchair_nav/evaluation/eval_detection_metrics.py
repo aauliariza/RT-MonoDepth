@@ -4,8 +4,8 @@ parameter count, and inference FPS.
 
 Usage:
     python -m wheelchair_nav.evaluation.eval_detection_metrics \
-        --weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-        --data ./data/sunrgbd_yolo/obstacle.yaml
+        --weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from ultralytics import YOLO
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights", required=True)
-    p.add_argument("--data", default="./data/sunrgbd_yolo/obstacle.yaml")
+    p.add_argument("--data", default="./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml")
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--device", default="0")
     p.add_argument("--fps_cycles", type=int, default=200)

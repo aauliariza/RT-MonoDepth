@@ -105,8 +105,8 @@ dan ke package `wheelchair_nav` sama-sama beres.
    ```bash
    python -m wheelchair_nav.scripts.prepare_sunrgbd \
        --sunrgbd_root /path/to/SUNRGBD \
-       --out_dir ./data/sunrgbd_processed \
-       --splits_dir ./splits_sunrgbd
+       --out_dir ./wheelchair_nav/data/sunrgbd_processed \
+       --splits_dir ./wheelchair_nav/splits_sunrgbd
    ```
 
    Script ini men-decode depth PNG 16-bit Kinect (bit-rotate 3-bit, standar
@@ -123,9 +123,9 @@ dan ke package `wheelchair_nav` sama-sama beres.
    ```bash
    python -m wheelchair_nav.scripts.prepare_sunrgbd \
        --sunrgbd_root /path/to/SUNRGBD \
-       --out_dir ./data/sunrgbd_processed \
-       --splits_dir ./splits_sunrgbd \
-       --make_yolo_labels --yolo_out_dir ./data/sunrgbd_yolo
+       --out_dir ./wheelchair_nav/data/sunrgbd_processed \
+       --splits_dir ./wheelchair_nav/splits_sunrgbd \
+       --make_yolo_labels --yolo_out_dir ./wheelchair_nav/data/sunrgbd_yolo
    ```
 
    Skema `annotation2Dfinal/index.json` yang dipakai (diverifikasi terhadap
@@ -140,7 +140,7 @@ dan ke package `wheelchair_nav` sama-sama beres.
    valid dilewati dan dihitung (bukan diganti dataset lain).
 
    Otomatis dibagi `train`/`val`/`test` (rasio sama dengan `--val_ratio`/`--test_ratio`)
-   ke `./data/sunrgbd_yolo/{images,labels}/{train,val,test}/` + `obstacle.yaml`.
+   ke `./wheelchair_nav/data/sunrgbd_yolo/{images,labels}/{train,val,test}/` + `obstacle.yaml`.
 
 ---
 
@@ -160,20 +160,20 @@ Hyperparameter yang dicari: `learning_rate`, `batch_size`, `smoothness_weight`,
 
 ```bash
 python -m wheelchair_nav.scripts.tune_depth_sunrgbd \
-    --splits_dir ./splits_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --height 192 --width 640 \
     --n_trials 30 --epochs_per_trial 5 \
-    --out_json ./log_sunrgbd/optuna_best_depth_hparams.json \
+    --out_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json \
     --device cuda
 ```
 
 - `--n_trials` -- jumlah kombinasi hyperparameter yang dicoba TPE (disarankan 20-50).
 - `--epochs_per_trial` -- budget proxy per trial, jauh lebih kecil dari
   `--num_epochs` training penuh supaya pencarian tetap cepat.
-- `--storage sqlite:///./log_sunrgbd/optuna_depth.db` (opsional) -- simpan progres
+- `--storage sqlite:///./wheelchair_nav/log_sunrgbd/optuna_depth.db` (opsional) -- simpan progres
   studi supaya bisa dilanjutkan/dijalankan paralel di beberapa proses.
 
-Hasil: `./log_sunrgbd/optuna_best_depth_hparams.json` (nilai val-L1 terbaik +
+Hasil: `./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json` (nilai val-L1 terbaik +
 hyperparameter terbaik) dan `..._trials.csv` (riwayat seluruh trial). Format JSON-nya
 sudah cocok langsung dipakai flag `--hparams_json` di langkah 3.
 
@@ -211,21 +211,21 @@ Pakai hyperparameter hasil tuning langkah 2 langsung lewat `--hparams_json` (men
 
 ```bash
 python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-    --splits_dir ./splits_sunrgbd \
-    --log_dir ./log_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --log_dir ./wheelchair_nav/log_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
     --height 192 --width 640 \
     --min_depth 0.1 --max_depth 10.0 \
     --num_epochs 40 \
-    --hparams_json ./log_sunrgbd/optuna_best_depth_hparams.json
+    --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 ```
 
 atau tanpa hasil tuning, set manual seperti biasa:
 
 ```bash
 python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-    --splits_dir ./splits_sunrgbd \
-    --log_dir ./log_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --log_dir ./wheelchair_nav/log_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
     --height 192 --width 640 \
     --min_depth 0.1 --max_depth 10.0 \
@@ -233,7 +233,7 @@ python -m wheelchair_nav.scripts.train_depth_sunrgbd \
 ```
 
 Checkpoint tiap epoch + checkpoint terbaik (val L1 terendah) disimpan di
-`./log_sunrgbd/RTMonoDepth_sunrgbd/models/{weights_N,best}/{encoder.pth,depth.pth}`
+`./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/{weights_N,best}/{encoder.pth,depth.pth}`
 -- format sama seperti `test_simple_full.py` di root (`encoder.pth` menyimpan juga
 `height`/`width`), sehingga bisa langsung dipakai `wheelchair_nav.perception.DepthEstimator`.
 
@@ -255,14 +255,14 @@ Hyperparameter yang dicari: optimizer (`lr0`, `lrf`, `momentum`, `weight_decay`,
 
 ```bash
 python -m wheelchair_nav.scripts.tune_yolo_obstacle \
-    --data ./data/sunrgbd_yolo/obstacle.yaml \
+    --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
     --n_trials 30 --epochs_per_trial 10 --imgsz 640 --batch 32 --device 0 \
-    --out_json ./log_yolo/optuna_best_yolo_hparams.json
+    --out_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 ```
 
-Hasil: `./log_yolo/optuna_best_yolo_hparams.json` (mAP50-95 terbaik + hyperparameter
+Hasil: `./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json` (mAP50-95 terbaik + hyperparameter
 terbaik) dan `..._trials.csv` (riwayat seluruh trial); artefak training tiap trial
-ada di `./log_yolo/optuna_tuning/trial_XXX/`. JSON-nya sudah cocok langsung dipakai
+ada di `./wheelchair_nav/log_yolo/optuna_tuning/trial_XXX/`. JSON-nya sudah cocok langsung dipakai
 flag `--hparams_json` di langkah 5.
 
 ---
@@ -280,20 +280,20 @@ Pakai hyperparameter hasil tuning langkah 4 lewat `--hparams_json`:
 
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
-    --data ./data/sunrgbd_yolo/obstacle.yaml \
+    --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
     --epochs 200 --imgsz 640 --batch 32 --device 0 \
-    --hparams_json ./log_yolo/optuna_best_yolo_hparams.json
+    --hparams_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 ```
 
 atau tanpa hasil tuning, set manual seperti biasa:
 
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
-    --data ./data/sunrgbd_yolo/obstacle.yaml \
+    --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
     --epochs 200 --imgsz 640 --batch 32 --device 0
 ```
 
-Bobot hasil training ada di `./log_yolo/obstacle_yolo26n/weights/best.pt`, siap
+Bobot hasil training ada di `./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt`, siap
 dipakai `--yolo_weights` di langkah 6.
 
 ---
@@ -310,29 +310,29 @@ tahu model mana yang dipakai.
 ```bash
 # RT-MonoDepth (full, default)
 python -m wheelchair_nav.run_navigation \
-    --video ./data/test_indoor.mp4 \
+    --video ./wheelchair_nav/data/test_indoor.mp4 \
     --depth_model rtmonodepth \
-    --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-    --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-    --output ./out/navigation_demo.mp4 \
+    --depth_weights ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+    --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+    --output ./wheelchair_nav/out/navigation_demo.mp4 \
     --device cuda --safe_distance 1.0
 
 # FastDepth
 python -m wheelchair_nav.run_navigation \
-    --video ./data/test_indoor.mp4 \
+    --video ./wheelchair_nav/data/test_indoor.mp4 \
     --depth_model fastdepth \
-    --depth_weights ./log_fastdepth/FastDepth_sunrgbd/models/best \
-    --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-    --output ./out/navigation_demo_fastdepth.mp4 \
+    --depth_weights ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+    --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+    --output ./wheelchair_nav/out/navigation_demo_fastdepth.mp4 \
     --device cuda --safe_distance 1.0
 
 # YOLO26n-depth / YOLO26s-depth (--depth_weights langsung ke file .pt, bukan folder)
 python -m wheelchair_nav.run_navigation \
-    --video ./data/test_indoor.mp4 \
+    --video ./wheelchair_nav/data/test_indoor.mp4 \
     --depth_model yolo26n-depth \
-    --depth_weights ./log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
-    --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-    --output ./out/navigation_demo_yolo26n_depth.mp4 \
+    --depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
+    --yolo_weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+    --output ./wheelchair_nav/out/navigation_demo_yolo26n_depth.mp4 \
     --device cuda --safe_distance 1.0
 ```
 
@@ -341,10 +341,10 @@ Arti `--depth_weights` tergantung `--depth_model`:
   `train_fastdepth_sunrgbd.py` (berisi `encoder.pth`+`depth.pth`, atau
   `fastdepth.pth`).
 - `yolo26n-depth` / `yolo26s-depth` -> satu file checkpoint `.pt` hasil
-  `train_yolo_depth.py` (mis. `runs/.../weights/best.pt`).
+  `train_yolo_depth.py` (mis. `./wheelchair_nav/log_yolo_depth/.../weights/best.pt`).
 
 Output:
-- `./out/navigation_demo.mp4` -- video **side-by-side** (RGB+overlay kiri, peta
+- `./wheelchair_nav/out/navigation_demo.mp4` -- video **side-by-side** (RGB+overlay kiri, peta
   depth berwarna kanan, ukuran sama, lebar video jadi 2x lebar input):
   - Kotak bbox per obstacle + label jarak (`obstacle X.XXm`, merah jika
     < `safe_distance`, hijau jika bebas).
@@ -355,7 +355,7 @@ Output:
   - Banner bawah: decision (`FORWARD`/`TURN_LEFT`/`TURN_RIGHT`/
     `TURN_FAR_LEFT`/`TURN_FAR_RIGHT`/`STOP`, warna sesuai jenis keputusan),
     `OBS: X.XXm` (jarak obstacle terdekat di semua sektor), dan FPS.
-- `./out/navigation_demo_log.csv` -- log per-frame (`frame, decision,
+- `./wheelchair_nav/out/navigation_demo_log.csv` -- log per-frame (`frame, decision,
   num_obstacles, min_depth_m, fps, FL0, L1, CTR2, R3, FR4`), dipakai evaluasi
   end-to-end di langkah 7.
 
@@ -370,8 +370,8 @@ Output:
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_depth_metrics \
-    --weights_dir ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-    --test_list ./splits_sunrgbd/test.txt \
+    --weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+    --test_list ./wheelchair_nav/splits_sunrgbd/test.txt \
     --device cuda
 ```
 
@@ -383,8 +383,8 @@ inferensi murni (warmup + averaged cycles, mengikuti pola `compare_runtime.py`).
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_detection_metrics \
-    --weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
-    --data ./data/sunrgbd_yolo/obstacle.yaml \
+    --weights ./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt \
+    --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
     --device 0
 ```
 
@@ -392,12 +392,12 @@ python -m wheelchair_nav.evaluation.eval_detection_metrics \
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_navigation_metrics \
-    --nav_log ./out/navigation_demo_log.csv \
+    --nav_log ./wheelchair_nav/out/navigation_demo_log.csv \
     --safe_distance 1.0 \
-    --gt_decisions ./data/gt_decisions.csv \
-    --gt_distances ./data/gt_distances.json \
-    --video ./data/test_indoor.mp4 \
-    --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best
+    --gt_decisions ./wheelchair_nav/data/gt_decisions.csv \
+    --gt_distances ./wheelchair_nav/data/gt_distances.json \
+    --video ./wheelchair_nav/data/test_indoor.mp4 \
+    --depth_weights ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best
 ```
 
 Selalu dihitung dari log: FPS pipeline (mean/min/max), **missed-stop rate** (obstacle
@@ -445,12 +445,12 @@ Ultralytics:
 ```bash
 python -m wheelchair_nav.scripts.prepare_sunrgbd \
     --sunrgbd_root /path/to/SUNRGBD \
-    --out_dir ./data/sunrgbd_processed \
-    --splits_dir ./splits_sunrgbd \
-    --make_yolo_depth_layout --yolo_depth_out_dir ./data/sunrgbd_yolo_depth
+    --out_dir ./wheelchair_nav/data/sunrgbd_processed \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --make_yolo_depth_layout --yolo_depth_out_dir ./wheelchair_nav/data/sunrgbd_yolo_depth
 ```
 
-Menghasilkan `./data/sunrgbd_yolo_depth/depth_comparison.yaml` (siap dipakai
+Menghasilkan `./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml` (siap dipakai
 `--data` di langkah 8c/8d) -- gambar yang di dalamnya **sama persis** dengan yang
 dipakai RT-MonoDepth/FastDepth via `splits_sunrgbd/*.txt`.
 
@@ -461,25 +461,25 @@ dipakai RT-MonoDepth/FastDepth via `splits_sunrgbd/*.txt`.
 #    dengan tune_depth_sunrgbd.py (langkah 2), supaya kedua model di-tuning
 #    dengan cara yang sama:
 python -m wheelchair_nav.scripts.tune_fastdepth_sunrgbd \
-    --splits_dir ./splits_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --height 192 --width 640 \
     --n_trials 30 --epochs_per_trial 5 \
-    --out_json ./log_fastdepth/optuna_best_fastdepth_hparams.json \
+    --out_json ./wheelchair_nav/log_fastdepth/optuna_best_fastdepth_hparams.json \
     --device cuda
 
 # 2) Training penuh, from scratch, pakai hasil tuning
 python -m wheelchair_nav.scripts.train_fastdepth_sunrgbd \
-    --splits_dir ./splits_sunrgbd \
-    --log_dir ./log_fastdepth \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --log_dir ./wheelchair_nav/log_fastdepth \
     --model_name FastDepth_sunrgbd \
     --height 192 --width 640 \
     --min_depth 0.1 --max_depth 10.0 \
     --num_epochs 40 \
-    --hparams_json ./log_fastdepth/optuna_best_fastdepth_hparams.json
+    --hparams_json ./wheelchair_nav/log_fastdepth/optuna_best_fastdepth_hparams.json
 ```
 
 Checkpoint tersimpan di
-`./log_fastdepth/FastDepth_sunrgbd/models/{weights_N,best}/fastdepth.pth`.
+`./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/{weights_N,best}/fastdepth.pth`.
 
 ### 8c. YOLO26n-depth / YOLO26s-depth: tuning lalu training
 
@@ -489,21 +489,21 @@ Checkpoint tersimpan di
 #    focus) + augmentasi; skor = validation abs_rel (diminimalkan)
 python -m wheelchair_nav.scripts.tune_yolo_depth \
     --variant n \
-    --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml \
+    --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
     --n_trials 30 --epochs_per_trial 10 --imgsz 640 --batch 16 --device 0 \
-    --out_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+    --out_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 
 # 2) Training penuh, pakai hasil tuning
 python -m wheelchair_nav.scripts.train_yolo_depth \
     --variant n \
-    --data ./data/sunrgbd_yolo_depth/depth_comparison.yaml \
+    --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
     --epochs 60 --imgsz 640 --batch 16 --device 0 \
-    --hparams_json ./log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
+    --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 ```
 
 Ganti `--variant n` menjadi `--variant s` untuk YOLO26s-depth (tuning dan training
 terpisah, sama perintah). Checkpoint tersimpan di
-`./log_yolo_depth/yolo26{n,s}_depth_sunrgbd/weights/best.pt` -- sudah otomatis
+`./wheelchair_nav/log_yolo_depth/yolo26{n,s}_depth_sunrgbd/weights/best.pt` -- sudah otomatis
 dikalibrasi skala metriknya oleh Ultralytics di akhir training (log
 `"Auto-calibration written to best.pt"`).
 
@@ -516,13 +516,13 @@ memulai dari bobot tertentu.
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_depth_comparison \
-    --test_list ./splits_sunrgbd/test.txt \
-    --rtmonodepth_weights_dir ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
-    --fastdepth_weights_dir ./log_fastdepth/FastDepth_sunrgbd/models/best \
-    --yolo26n_depth_weights ./log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
-    --yolo26s_depth_weights ./log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
+    --test_list ./wheelchair_nav/splits_sunrgbd/test.txt \
+    --rtmonodepth_weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
+    --fastdepth_weights_dir ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+    --yolo26n_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
+    --yolo26s_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
     --device cuda \
-    --out_csv ./log_sunrgbd/depth_comparison.csv
+    --out_csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv
 ```
 
 Boleh isi hanya sebagian flag `--*_weights*` -- model yang tidak diberi bobotnya

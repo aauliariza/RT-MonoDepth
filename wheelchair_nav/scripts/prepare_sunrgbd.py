@@ -36,10 +36,10 @@ can be null (deleted/merged objects); see _parse_annotation2d().
 Usage:
     python -m wheelchair_nav.scripts.prepare_sunrgbd \
         --sunrgbd_root /path/to/SUNRGBD \
-        --out_dir ./data/sunrgbd_processed \
-        --splits_dir ./splits_sunrgbd \
-        --make_yolo_labels --yolo_out_dir ./data/sunrgbd_yolo \
-        --make_yolo_depth_layout --yolo_depth_out_dir ./data/sunrgbd_yolo_depth
+        --out_dir ./wheelchair_nav/data/sunrgbd_processed \
+        --splits_dir ./wheelchair_nav/splits_sunrgbd \
+        --make_yolo_labels --yolo_out_dir ./wheelchair_nav/data/sunrgbd_yolo \
+        --make_yolo_depth_layout --yolo_depth_out_dir ./wheelchair_nav/data/sunrgbd_yolo_depth
 """
 from __future__ import annotations
 
@@ -342,9 +342,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sunrgbd_root", required=True,
                          help="Path to extracted SUNRGBD/ root (contains kv1/, kv2/, realsense/, xtion/)")
-    parser.add_argument("--out_dir", default="./data/sunrgbd_processed",
+    parser.add_argument("--out_dir", default="./wheelchair_nav/data/sunrgbd_processed",
                          help="Where metric-depth .npy files are written")
-    parser.add_argument("--splits_dir", default="./splits_sunrgbd",
+    parser.add_argument("--splits_dir", default="./wheelchair_nav/splits_sunrgbd",
                          help="Where train/val/test.txt pair lists are written")
     parser.add_argument("--depth_encoding", choices=["bitshift", "raw_mm"], default="bitshift")
     parser.add_argument("--val_ratio", type=float, default=0.1)
@@ -353,7 +353,7 @@ def parse_args():
     parser.add_argument("--make_yolo_labels", action="store_true",
                          help="Convert SUN RGB-D's own annotation2Dfinal/ 2D boxes into YOLO obstacle "
                               "labels -- required before training YOLO26-nano (train_yolo_obstacle.py)")
-    parser.add_argument("--yolo_out_dir", default="./data/sunrgbd_yolo")
+    parser.add_argument("--yolo_out_dir", default="./wheelchair_nav/data/sunrgbd_yolo")
     parser.add_argument("--exclude_classes", default="wall,floor,ceiling",
                          help="Comma-separated SUN RGB-D object names (case-insensitive) to drop -- "
                               "room surfaces are not physical obstacles and would otherwise become "
@@ -364,7 +364,7 @@ def parse_args():
     parser.add_argument("--make_yolo_depth_layout", action="store_true",
                          help="Also mirror the train/val/test split into the images/+depth/ layout "
                               "used by YOLO26n-depth/YOLO26s-depth (baselines/yolo_depth_estimator.py)")
-    parser.add_argument("--yolo_depth_out_dir", default="./data/sunrgbd_yolo_depth")
+    parser.add_argument("--yolo_depth_out_dir", default="./wheelchair_nav/data/sunrgbd_yolo_depth")
     parser.add_argument("--max_depth", type=float, default=10.0,
                          help="Written into depth_comparison.yaml so DepthValidator's metric range matches")
     return parser.parse_args()

@@ -21,10 +21,10 @@ Optional, if you provide ground truth:
 
 Usage:
     python -m wheelchair_nav.evaluation.eval_navigation_metrics \
-        --nav_log ./out/navigation_demo_log.csv \
-        --gt_decisions ./data/gt_decisions.csv \
-        --gt_distances ./data/gt_distances.json \
-        --video ./data/input.mp4 --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best
+        --nav_log ./wheelchair_nav/out/navigation_demo_log.csv \
+        --gt_decisions ./wheelchair_nav/data/gt_decisions.csv \
+        --gt_distances ./wheelchair_nav/data/gt_distances.json \
+        --video ./wheelchair_nav/data/input.mp4 --depth_weights ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best
 """
 from __future__ import annotations
 
