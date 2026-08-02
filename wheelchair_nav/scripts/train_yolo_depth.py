@@ -33,9 +33,9 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--variant", choices=["n", "s"], default="n", help="YOLO26 scale: n (nano) or s (small)")
     p.add_argument("--data", default="./data/sunrgbd_yolo_depth/depth_comparison.yaml")
-    p.add_argument("--pretrained", default=None,
-                    help="Pretrained weights to start from (default: yolo26{variant}-depth.pt); "
-                         "pass '' to train from random init (yolo26{variant}-depth.yaml)")
+    p.add_argument("--pretrained", default="",
+                    help="Empty (default) trains from random init (yolo26{variant}-depth.yaml) -- "
+                         "no pretrained checkpoint is used unless a path is passed explicitly")
     p.add_argument("--epochs", type=int, default=60)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=16)
@@ -51,8 +51,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    weights = args.pretrained if args.pretrained is not None else f"yolo26{args.variant}-depth.pt"
-    model = YOLO(weights) if weights else YOLO(f"yolo26{args.variant}-depth.yaml")
+    model = YOLO(args.pretrained) if args.pretrained else YOLO(f"yolo26{args.variant}-depth.yaml")
     name = args.name or f"yolo26{args.variant}_depth_sunrgbd"
 
     extra_hparams = {}

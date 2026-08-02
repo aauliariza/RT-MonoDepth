@@ -56,8 +56,7 @@ def objective_factory(args):
             "mosaic": trial.suggest_float("mosaic", 0.0, 1.0),
         }
 
-        weights = args.pretrained if args.pretrained is not None else f"yolo26{args.variant}-depth.pt"
-        model = YOLO(weights) if weights else YOLO(f"yolo26{args.variant}-depth.yaml")
+        model = YOLO(args.pretrained) if args.pretrained else YOLO(f"yolo26{args.variant}-depth.yaml")
         trial_name = f"trial_{trial.number:03d}"
 
         model.train(
@@ -84,9 +83,10 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--variant", choices=["n", "s"], default="n", help="YOLO26 scale: n (nano) or s (small)")
     p.add_argument("--data", default="./data/sunrgbd_yolo_depth/depth_comparison.yaml")
-    p.add_argument("--pretrained", default=None,
-                    help="Pretrained weights each trial starts from (default: yolo26{variant}-depth.pt); "
-                         "pass '' for random init")
+    p.add_argument("--pretrained", default="",
+                    help="Empty (default) trains each trial from random init "
+                         "(yolo26{variant}-depth.yaml) -- no pretrained checkpoint is used unless "
+                         "a path is passed explicitly")
     p.add_argument("--epochs_per_trial", type=int, default=10,
                     help="Short proxy fine-tuning budget per trial -- the full budget is used "
                          "later in train_yolo_depth.py")

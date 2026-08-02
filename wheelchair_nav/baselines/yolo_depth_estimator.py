@@ -18,7 +18,7 @@ import numpy as np
 
 
 class YoloDepthEstimator:
-    def __init__(self, weights: str = "yolo26n-depth.pt", device: str = "cuda", imgsz: int = 640):
+    def __init__(self, weights: str, device: str = "cuda", imgsz: int = 640):
         from ultralytics import YOLO  # lazy import, mirrors perception/obstacle_detector.py
 
         self.model = YOLO(weights)

@@ -490,8 +490,10 @@ terpisah, sama perintah). Checkpoint tersimpan di
 dikalibrasi skala metriknya oleh Ultralytics di akhir training (log
 `"Auto-calibration written to best.pt"`).
 
-Default `--pretrained` memakai bobot `yolo26{n,s}-depth.pt` (pretrained Ultralytics)
-sebagai titik awal; pakai `--pretrained ""` untuk training dari bobot acak.
+Default `--pretrained` kosong (`""`) -> training dari bobot acak
+(`yolo26{n,s}-depth.yaml`), konsisten dengan kebijakan "from scratch" di semua
+model lain; isi `--pretrained` dengan path checkpoint kalau memang butuh
+memulai dari bobot tertentu.
 
 ### 8d. Jalankan perbandingan apples-to-apples
 
