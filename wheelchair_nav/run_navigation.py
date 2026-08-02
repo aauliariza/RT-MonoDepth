@@ -1,10 +1,17 @@
 """End-to-end offline test of the wheelchair navigation pipeline on a video
 file:
 
-    YOLO26-nano bboxes -> RT-MonoDepth metric depth -> Obstacle List
+    YOLO26-nano bboxes -> monocular depth model -> Obstacle List
     (median depth per bbox inner ROI) -> Sector-Based Free-Path Selection
     (priority CTR>L>R>FL>FR>STOP, N=3 hysteresis) -> Decision
     -> simulated wheelchair drive command.
+
+The depth model is selectable via --depth_model: RT-MonoDepth (full,
+default), FastDepth, or YOLO26n/s-depth -- any of the four models trained
+in this project can drive the same pipeline, since
+DepthEstimator/FastDepthEstimator/YoloDepthEstimator all expose the same
+.infer(frame_bgr) -> metric depth (meters) interface (see
+evaluation/eval_depth_comparison.py, which uses the same three classes).
 
 Writes an annotated output video: RGB (left) with per-obstacle bboxes +
 distance, the 5 sectors (FL|L|CTR|R|FR) tinted by status (green = the
@@ -13,12 +20,29 @@ banner (decision, nearest-obstacle distance, FPS), concatenated side by
 side with the colorized depth map (right, same resolution) -- plus a
 per-frame CSV log used by evaluation/eval_navigation_metrics.py.
 
-Usage:
+Usage (RT-MonoDepth, default):
     python -m wheelchair_nav.run_navigation \
         --video path/to/input.mp4 \
+        --depth_model rtmonodepth \
         --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
         --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
         --output ./out/navigation_demo.mp4
+
+Usage (FastDepth):
+    python -m wheelchair_nav.run_navigation \
+        --video path/to/input.mp4 \
+        --depth_model fastdepth \
+        --depth_weights ./log_fastdepth/FastDepth_sunrgbd/models/best \
+        --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
+        --output ./out/navigation_demo_fastdepth.mp4
+
+Usage (YOLO26n-depth / YOLO26s-depth):
+    python -m wheelchair_nav.run_navigation \
+        --video path/to/input.mp4 \
+        --depth_model yolo26n-depth \
+        --depth_weights ./log_yolo_depth/yolo26n_depth/weights/best.pt \
+        --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
+        --output ./out/navigation_demo_yolo26n_depth.mp4
 """
 from __future__ import annotations
 
@@ -35,13 +59,48 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from wheelchair_nav.config import SAFE_DISTANCE_M, SECTOR_NAMES  # noqa: E402
+from wheelchair_nav.config import MAX_DEPTH_M, MIN_DEPTH_M, SAFE_DISTANCE_M, SECTOR_NAMES  # noqa: E402
 from wheelchair_nav.navigation.controller import WheelchairController  # noqa: E402
 from wheelchair_nav.navigation.free_path import DECISION_TO_SECTOR, FreePathSelector  # noqa: E402
 from wheelchair_nav.navigation.sectors import compute_sector_depths  # noqa: E402
-from wheelchair_nav.perception.depth_estimator import DepthEstimator  # noqa: E402
 from wheelchair_nav.perception.obstacle_detector import ObstacleDetector  # noqa: E402
 from wheelchair_nav.perception.obstacle_list import build_obstacle_list  # noqa: E402
+
+DEPTH_MODEL_CHOICES = ("rtmonodepth", "fastdepth", "yolo26n-depth", "yolo26s-depth")
+
+
+def build_depth_estimator(args):
+    """Instantiates the selected monocular depth model behind the common
+    .infer(frame_bgr) -> (H, W) float32 metric-depth interface, so the rest
+    of the pipeline (Obstacle List, sectors, hysteresis, overlay) doesn't
+    need to know which model produced the depth map.
+
+    --depth_weights means different things depending on --depth_model:
+      rtmonodepth/fastdepth -> a folder (encoder.pth+depth.pth, or
+        fastdepth.pth respectively) saved by the matching train_*.py script.
+      yolo26n-depth/yolo26s-depth -> a single Ultralytics checkpoint file
+        (e.g. runs/.../weights/best.pt) saved by train_yolo_depth.py.
+    """
+    if args.depth_model == "rtmonodepth":
+        from wheelchair_nav.perception.depth_estimator import DepthEstimator
+
+        return DepthEstimator(
+            args.depth_weights, device=args.device,
+            min_depth_m=args.min_depth, max_depth_m=args.max_depth,
+        )
+    if args.depth_model == "fastdepth":
+        from wheelchair_nav.baselines.fastdepth_estimator import FastDepthEstimator
+
+        return FastDepthEstimator(
+            args.depth_weights, device=args.device,
+            min_depth_m=args.min_depth, max_depth_m=args.max_depth,
+        )
+    if args.depth_model in ("yolo26n-depth", "yolo26s-depth"):
+        from wheelchair_nav.baselines.yolo_depth_estimator import YoloDepthEstimator
+
+        return YoloDepthEstimator(args.depth_weights, device=args.device, imgsz=args.yolo_depth_imgsz)
+
+    raise SystemExit(f"Unknown --depth_model: {args.depth_model}")
 
 DECISION_COLOR = {
     "FORWARD": (60, 200, 60),
@@ -193,7 +252,13 @@ def open_video_writer(output_path: str, fps: float, size: tuple):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--video", required=True)
-    p.add_argument("--depth_weights", required=True, help="Folder with encoder.pth + depth.pth")
+    p.add_argument("--depth_model", default="rtmonodepth", choices=DEPTH_MODEL_CHOICES,
+                    help="Which trained monocular depth model drives the pipeline (default: rtmonodepth)")
+    p.add_argument("--depth_weights", required=True,
+                    help="rtmonodepth/fastdepth: folder saved by the matching train_*.py script "
+                         "(encoder.pth+depth.pth, or fastdepth.pth). "
+                         "yolo26n-depth/yolo26s-depth: path to a single .pt checkpoint "
+                         "from train_yolo_depth.py")
     p.add_argument("--yolo_weights", required=True,
                     help="Path to a YOLO26-nano checkpoint trained from scratch on SUN RGB-D "
                          "(scripts/train_yolo_obstacle.py) -- no COCO-pretrained or other checkpoint")
@@ -202,6 +267,12 @@ def parse_args():
     p.add_argument("--device", default="cuda")
     p.add_argument("--safe_distance", type=float, default=SAFE_DISTANCE_M)
     p.add_argument("--conf", type=float, default=0.35)
+    p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M,
+                    help="Only used by --depth_model rtmonodepth/fastdepth")
+    p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M,
+                    help="Only used by --depth_model rtmonodepth/fastdepth")
+    p.add_argument("--yolo_depth_imgsz", type=int, default=640,
+                    help="Only used by --depth_model yolo26n-depth/yolo26s-depth")
     p.add_argument("--max_depth_vis", type=float, default=6.0)
     p.add_argument("--show", action="store_true")
     return p.parse_args()
@@ -214,7 +285,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     log_csv = args.log_csv or os.path.splitext(args.output)[0] + "_log.csv"
 
-    depth_estimator = DepthEstimator(args.depth_weights, device=args.device)
+    depth_estimator = build_depth_estimator(args)
     detector = ObstacleDetector(args.yolo_weights, conf=args.conf, device=args.device)
     selector = FreePathSelector(safe_distance_m=args.safe_distance)
     controller = WheelchairController()

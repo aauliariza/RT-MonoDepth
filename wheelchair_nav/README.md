@@ -283,14 +283,48 @@ dipakai `--yolo_weights` di langkah 6.
 
 ## 6. Testing sistem navigasi pada file video
 
+Model depth yang dipakai untuk estimasi jarak bisa dipilih lewat `--depth_model`
+-- bukan cuma RT-MonoDepth, tapi juga FastDepth dan YOLO26n/s-depth (model
+pembanding di langkah 8), karena `DepthEstimator`, `FastDepthEstimator`, dan
+`YoloDepthEstimator` sama-sama mengekspos interface `.infer(frame_bgr)` yang
+sama -- kode navigasi (Obstacle List, sektor, hysteresis, overlay) tidak perlu
+tahu model mana yang dipakai.
+
 ```bash
+# RT-MonoDepth (full, default)
 python -m wheelchair_nav.run_navigation \
     --video ./data/test_indoor.mp4 \
+    --depth_model rtmonodepth \
     --depth_weights ./log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
     --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
     --output ./out/navigation_demo.mp4 \
     --device cuda --safe_distance 1.0
+
+# FastDepth
+python -m wheelchair_nav.run_navigation \
+    --video ./data/test_indoor.mp4 \
+    --depth_model fastdepth \
+    --depth_weights ./log_fastdepth/FastDepth_sunrgbd/models/best \
+    --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
+    --output ./out/navigation_demo_fastdepth.mp4 \
+    --device cuda --safe_distance 1.0
+
+# YOLO26n-depth / YOLO26s-depth (--depth_weights langsung ke file .pt, bukan folder)
+python -m wheelchair_nav.run_navigation \
+    --video ./data/test_indoor.mp4 \
+    --depth_model yolo26n-depth \
+    --depth_weights ./log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
+    --yolo_weights ./log_yolo/obstacle_yolo26n/weights/best.pt \
+    --output ./out/navigation_demo_yolo26n_depth.mp4 \
+    --device cuda --safe_distance 1.0
 ```
+
+Arti `--depth_weights` tergantung `--depth_model`:
+- `rtmonodepth` / `fastdepth` -> folder hasil `train_depth_sunrgbd.py` /
+  `train_fastdepth_sunrgbd.py` (berisi `encoder.pth`+`depth.pth`, atau
+  `fastdepth.pth`).
+- `yolo26n-depth` / `yolo26s-depth` -> satu file checkpoint `.pt` hasil
+  `train_yolo_depth.py` (mis. `runs/.../weights/best.pt`).
 
 Output:
 - `./out/navigation_demo.mp4` -- video **side-by-side** (RGB+overlay kiri, peta
