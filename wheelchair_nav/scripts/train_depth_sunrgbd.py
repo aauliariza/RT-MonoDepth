@@ -56,6 +56,7 @@ from layers import disp_to_depth, get_smooth_loss  # noqa: E402  (repo root, unm
 from networks.RTMonoDepth.RTMonoDepth import DepthDecoder, DepthEncoder  # noqa: E402  (repo root, unmodified)
 
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
+from wheelchair_nav.training_log import save_training_curve  # noqa: E402
 
 
 def masked_l1(pred: torch.Tensor, gt: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -191,8 +192,10 @@ def main():
     optimizer = torch.optim.AdamW(params, lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.scheduler_step_size, 0.1)
 
-    save_root = os.path.join(args.log_dir, args.model_name, "models")
+    model_dir = os.path.join(args.log_dir, args.model_name)
+    save_root = os.path.join(model_dir, "models")
     best_val = float("inf")
+    history_epochs, history_train, history_val = [], [], []
 
     for epoch in range(args.num_epochs):
         encoder.train()
@@ -237,7 +240,17 @@ def main():
             best_val = val_loss
             save_models(os.path.join(save_root, "best"), encoder, decoder, args.height, args.width)
 
+        history_epochs.append(epoch)
+        history_train.append(train_loss)
+        history_val.append(val_loss)
+        save_training_curve(
+            model_dir, history_epochs, history_train, history_val,
+            train_label="train_loss (multiscale L1+SIlog+smooth)", val_label="val_L1 (m)",
+            title=f"{args.model_name} training curve",
+        )
+
     print(f"Done. Best val L1: {best_val:.4f} m. Weights saved under {save_root}")
+    print(f"Training curve: {os.path.join(model_dir, 'training_curve.png')}")
 
 
 if __name__ == "__main__":

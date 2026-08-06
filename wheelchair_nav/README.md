@@ -237,6 +237,12 @@ Checkpoint tiap epoch + checkpoint terbaik (val L1 terendah) disimpan di
 -- format sama seperti `test_simple_full.py` di root (`encoder.pth` menyimpan juga
 `height`/`width`), sehingga bisa langsung dipakai `wheelchair_nav.perception.DepthEstimator`.
 
+Kurva train-loss vs val-loss per epoch (untuk mengecek overfitting/underfitting)
+otomatis di-update tiap akhir epoch ke
+`./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/training_curve.png` (+ data
+mentahnya di `training_log.csv` sebelahnya) -- bisa dipantau langsung meski
+training masih berjalan.
+
 ---
 
 ## 4. Hyperparameter tuning YOLO26-nano (Optuna, TPE sampler)
@@ -480,6 +486,10 @@ python -m wheelchair_nav.scripts.train_fastdepth_sunrgbd \
 
 Checkpoint tersimpan di
 `./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/{weights_N,best}/fastdepth.pth`.
+
+Sama seperti RT-MonoDepth, kurva train vs val loss otomatis tersimpan di
+`./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/training_curve.png`
+(+ `training_log.csv`).
 
 ### 8c. YOLO26n-depth / YOLO26s-depth: tuning lalu training
 
