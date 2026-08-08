@@ -72,6 +72,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from wheelchair_nav.config import INPUT_HEIGHT, INPUT_WIDTH  # noqa: E402
+
 # criterion -> is a HIGHER value better?
 CRITERIA = {
     "abs_rel": False,
@@ -95,12 +97,17 @@ def read_rows(csv_path: str, macs_column: str = "auto"):
     """Loads the comparison table and returns (names, X, macs_col_used).
 
     MACs are read from `macs_g_ref` when available -- every model measured
-    at one common resolution, so the column compares architectures. The
-    as-deployed `macs_g` column is NOT comparable across models here,
-    because the Ultralytics depth models run at imgsz x imgsz (640x640 by
-    default) while the others run at 192x640, i.e. 3.3x more pixels; using
-    it silently penalises the higher-resolution models. Falling back to it
-    is allowed but warned about loudly.
+    at one common resolution, so the column compares architectures.
+
+    The as-deployed `macs_g` column is still not directly comparable, even
+    though every depth model in this project now sees the same image
+    content (config.INPUT_HEIGHT x INPUT_WIDTH): the Ultralytics models
+    reach that content by letterboxing onto a square imgsz x imgsz canvas,
+    so their TENSOR is larger than the content it carries and they pay MACs
+    for the padding. That padding cost is real at deployment, which is why
+    `macs_g` is reported -- but it is not an architectural property, so
+    scoring on it penalises those models for their input plumbing. Falling
+    back to it is allowed and warned about loudly.
     """
     with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -128,10 +135,11 @@ def read_rows(csv_path: str, macs_column: str = "auto"):
         feeds = {r.get("feed_hw") for r in rows if r.get("feed_hw")}
         warning = (
             "WARNING: using as-deployed 'macs_g'. "
-            + (f"Models run at differing resolutions ({', '.join(sorted(feeds))}), so these "
+            + (f"Models run at differing tensor shapes ({', '.join(sorted(feeds))}), so these "
                "MACs are NOT architecture-comparable and NetScore will penalise the "
-               "higher-resolution models. " if len(feeds) > 1 else "")
-            + "Regenerate the CSV with --macs_ref_hw 192x640 for a comparable column.\n"
+               "larger-tensor models. " if len(feeds) > 1 else "")
+            + "Regenerate the CSV with "
+              f"--macs_ref_hw {INPUT_HEIGHT}x{INPUT_WIDTH} for a comparable column.\n"
         )
         print(warning)
 
