@@ -1,12 +1,14 @@
 """Apples-to-apples comparison of RT-MonoDepth (full, this project's chosen
-depth model) against three baselines trained/tuned on the exact same SUN
+depth model) against four baselines trained/tuned on the exact same SUN
 RGB-D train/val/test split (see scripts/prepare_sunrgbd.py):
 
   - FastDepth              (networks/FastDepth/model.py, unmodified)
+  - Ghost-Depth            (networks/GhostDepth/ghost_depth.py, reimplemented
+                            from Quan et al., CNIOT '23)
   - YOLO26n-depth           (Ultralytics native depth task, unmodified)
   - YOLO26s-depth           (Ultralytics native depth task, unmodified)
 
-All four models are scored with the exact same metric definitions
+All models are scored with the exact same metric definitions
 (abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3 -- identical formulas to
 evaluate_depth_full.py in the repo root and
 evaluation/eval_depth_metrics.py), the same valid-pixel mask, and the same
@@ -23,6 +25,7 @@ Usage:
         --test_list ./wheelchair_nav/splits_sunrgbd/test.txt \
         --rtmonodepth_weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
         --fastdepth_weights_dir ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+        --ghostdepth_weights_dir ./wheelchair_nav/log_ghostdepth/GhostDepth_sunrgbd/models/best \
         --yolo26n_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
         --yolo26s_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
         --out_csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv
@@ -94,6 +97,14 @@ def build_estimators(args):
             min_depth_m=args.min_depth, max_depth_m=args.max_depth,
         )
 
+    if args.ghostdepth_weights_dir:
+        from wheelchair_nav.baselines.ghostdepth_estimator import GhostDepthEstimator
+
+        estimators["Ghost-Depth"] = GhostDepthEstimator(
+            args.ghostdepth_weights_dir, device=args.device,
+            min_depth_m=args.min_depth, max_depth_m=args.max_depth,
+        )
+
     if args.yolo26n_depth_weights:
         from wheelchair_nav.baselines.yolo_depth_estimator import YoloDepthEstimator
 
@@ -112,7 +123,8 @@ def build_estimators(args):
         raise SystemExit(
             "No model weights provided -- pass at least one of "
             "--rtmonodepth_weights_dir / --fastdepth_weights_dir / "
-            "--yolo26n_depth_weights / --yolo26s_depth_weights."
+            "--ghostdepth_weights_dir / --yolo26n_depth_weights / "
+            "--yolo26s_depth_weights."
         )
     return estimators
 
@@ -195,6 +207,7 @@ def parse_args():
     p.add_argument("--test_list", default="./wheelchair_nav/splits_sunrgbd/test.txt")
     p.add_argument("--rtmonodepth_weights_dir", default=None)
     p.add_argument("--fastdepth_weights_dir", default=None)
+    p.add_argument("--ghostdepth_weights_dir", default=None)
     p.add_argument("--yolo26n_depth_weights", default=None)
     p.add_argument("--yolo26s_depth_weights", default=None)
     p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M)

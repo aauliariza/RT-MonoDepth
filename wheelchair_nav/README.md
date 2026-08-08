@@ -35,6 +35,7 @@ dipilih (jalur aman yang dilewati), **kuning/amber** = bebas tapi tidak dipilih
 wheelchair_nav/
   config.py                        thresholds, sektor, ukuran input
   datasets/sunrgbd_dataset.py       PyTorch Dataset RGB + metric-depth SUN RGB-D
+  training_log.py                  CSV + kurva train/val loss (dipakai trainer depth)
   scripts/
     prepare_sunrgbd.py               download-agnostic preprocessing SUN RGB-D
     tune_depth_sunrgbd.py             Optuna-TPE hyperparameter search for RT-MonoDepth
@@ -43,6 +44,8 @@ wheelchair_nav/
     train_yolo_obstacle.py           fine-tuning YOLO26-nano (class-agnostic)
     tune_fastdepth_sunrgbd.py         Optuna-TPE hyperparameter search for FastDepth (baseline)
     train_fastdepth_sunrgbd.py       training FastDepth (baseline) from scratch
+    tune_ghostdepth_sunrgbd.py        Optuna-TPE hyperparameter search for Ghost-Depth (baseline)
+    train_ghostdepth_sunrgbd.py      training Ghost-Depth (baseline) from scratch, berHu loss
     tune_yolo_depth.py                Optuna-TPE hyperparameter search for YOLO26{n,s}-depth (baseline)
     train_yolo_depth.py              training YOLO26n-depth / YOLO26s-depth (baseline)
   perception/
@@ -51,6 +54,7 @@ wheelchair_nav/
     obstacle_list.py                  fusi bbox + depth map -> Obstacle List
   baselines/                        model depth pembanding (apples-to-apples), lihat langkah 8
     fastdepth_estimator.py            wrapper inferensi FastDepth (unmodified)
+    ghostdepth_estimator.py           wrapper inferensi Ghost-Depth (reimplementasi CNIOT '23)
     yolo_depth_estimator.py           wrapper inferensi YOLO26{n,s}-depth (unmodified)
   navigation/
     sectors.py                        partisi FOV jadi 5 sektor FL0..FR4
@@ -62,8 +66,9 @@ wheelchair_nav/
     eval_detection_metrics.py         mAP50/mAP50-95/precision/recall + params + FPS
     eval_navigation_metrics.py        FPS pipeline, missed/false-stop rate,
                                        decision accuracy, distance MAE/RMSE
-    eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs YOLO26{n,s}-depth,
-                                       metrik+params+FPS identik, test split identik
+    eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs Ghost-Depth vs
+                                       YOLO26{n,s}-depth, metrik+params+FPS identik,
+                                       test split identik
   requirements.txt
 ```
 
@@ -419,9 +424,9 @@ Opsional dengan ground truth:
 
 ---
 
-## 8. Model depth pembanding (apples-to-apples): FastDepth, YOLO26n-depth, YOLO26s-depth
+## 8. Model depth pembanding (apples-to-apples): FastDepth, Ghost-Depth, YOLO26n-depth, YOLO26s-depth
 
-Untuk membandingkan RT-MonoDepth secara adil, tiga model depth lain dilatih **dari
+Untuk membandingkan RT-MonoDepth secara adil, empat model depth lain dilatih **dari
 data yang persis sama** (`splits_sunrgbd/{train,val,test}.txt` dari langkah 1) dan
 dievaluasi dengan **formula metrik yang persis sama** (`abs_rel, sq_rel, rmse,
 rmse_log, a1, a2, a3`, identik dengan `evaluate_depth_full.py` di root repo):
@@ -430,16 +435,24 @@ rmse_log, a1, a2, a3`, identik dengan `evaluate_depth_full.py` di root repo):
   repo ini tanpa diubah** (dipakai `compare_runtime.py` untuk benchmark runtime).
   Output lapisan terakhirnya sudah ReLU (selalu >= 0); di sini hanya di-*clamp* ke
   rentang metric yang sama dengan RT-MonoDepth, tanpa menambah lapisan baru.
+- **Ghost-Depth** -- `networks/GhostDepth/ghost_depth.py`, **reimplementasi** dari
+  Quan et al., *"Ghost-Depth: A Lightweight Encoder-Decoder Network for Monocular
+  Depth Estimation"*, CNIOT '23 ([doi:10.1145/3603781.3603861](https://doi.org/10.1145/3603781.3603861)).
+  Encoder GhostNet + decoder Ghost convolution + skip connection iAFF di jalur
+  40-channel, dilatih dengan **berHu loss** (Eq. 3 di paper). Lihat langkah 8c dan
+  catatan reproduksi di bawah.
 - **YOLO26n-depth** dan **YOLO26s-depth** -- arsitektur *native* Ultralytics untuk
   monocular depth estimation (`ultralytics/cfg/models/26/yolo26-depth.yaml`, skala
   `n`/`s`), **tidak diubah**. Training, loss (SILog + gradient), dan kalibrasi skala
   metrik pasca-training sepenuhnya ditangani oleh trainer/validator bawaan
   Ultralytics (`ultralytics.models.yolo.depth`) -- kode di sini hanya membungkusnya.
 
-Keempat model (RT-MonoDepth + 3 pembanding) tidak menyentuh
-`wheelchair_nav/perception/` maupun `run_navigation.py` -- RT-MonoDepth + YOLO26-nano
-detektor tetap satu-satunya stack yang dipakai sistem navigasi. `baselines/` dan
-skrip `*_fastdepth_*`/`*_yolo_depth_*` di atas murni untuk studi perbandingan.
+Kelima model (RT-MonoDepth + 4 pembanding) tidak menyentuh
+`wheelchair_nav/perception/` -- RT-MonoDepth + YOLO26-nano detektor tetap stack
+default sistem navigasi. `baselines/` dan skrip `*_fastdepth_*`/`*_ghostdepth_*`/
+`*_yolo_depth_*` di atas murni untuk studi perbandingan; `run_navigation.py`
+tetap bisa memakai model manapun lewat `--depth_model` kalau ingin dibandingkan
+end-to-end.
 
 ### 8a. Siapkan layout dataset yang identik untuk YOLO26{n,s}-depth
 
@@ -457,7 +470,7 @@ python -m wheelchair_nav.scripts.prepare_sunrgbd \
 ```
 
 Menghasilkan `./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml` (siap dipakai
-`--data` di langkah 8c/8d) -- gambar yang di dalamnya **sama persis** dengan yang
+`--data` di langkah 8d) -- gambar yang di dalamnya **sama persis** dengan yang
 dipakai RT-MonoDepth/FastDepth via `splits_sunrgbd/*.txt`.
 
 ### 8b. FastDepth: tuning lalu training (sama pola dengan RT-MonoDepth)
@@ -491,7 +504,75 @@ Sama seperti RT-MonoDepth, kurva train vs val loss otomatis tersimpan di
 `./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/training_curve.png`
 (+ `training_log.csv`).
 
-### 8c. YOLO26n-depth / YOLO26s-depth: tuning lalu training
+### 8c. Ghost-Depth: tuning lalu training
+
+Reimplementasi dari Quan et al., CNIOT '23
+([doi:10.1145/3603781.3603861](https://doi.org/10.1145/3603781.3603861)).
+Arsitekturnya (`networks/GhostDepth/ghost_depth.py`), sesuai paper sec. 3.1:
+
+```
+input        3 x H     x W
+encoder /2  16 x H/2   x W/2    -> skip (addition)
+encoder /4  24 x H/4   x W/4    -> skip (addition)
+encoder /8  40 x H/8   x W/8    -> skip (iAFF)          <- hanya di sini
+encoder /16 80 x H/16  x W/16   -> skip (addition)
+encoder /32 -> conv penurun channel -> 4x upsampling module
+             (bilinear x2 -> fuse skip -> Ghost-A -> Ghost-B)
+output       1 x H/2   x W/2
+```
+
+- **Encoder**: GhostNet [Han et al., CVPR 2020] tanpa layer klasifikasi.
+- **Decoder**: Ghost convolution menggantikan konvolusi 3x3 biasa; **Ghost-A**
+  menurunkan jumlah channel, **Ghost-B** merapikan tanpa mengubah channel.
+- **iAFF** [Dai et al., WACV 2021] hanya dipasang di skip 40-channel -- persis
+  konfigurasi terbaik di ablation Table 3 paper; skip lain pakai penjumlahan biasa.
+- **Loss**: berHu / *reverse Huber* (Eq. 3), dengan `c = 0.2 x max|error|` per
+  gambar. Default `--loss berhu`; pakai `--loss l1_silog` kalau ingin meng-ablasi
+  arsitektur di bawah objective yang sama dengan RT-MonoDepth/FastDepth.
+
+```bash
+# 1) Hyperparameter tuning (Optuna, TPE) -- protokol & objective identik
+#    dengan tune_depth_sunrgbd.py / tune_fastdepth_sunrgbd.py
+python -m wheelchair_nav.scripts.tune_ghostdepth_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --height 192 --width 640 \
+    --n_trials 30 --epochs_per_trial 5 \
+    --out_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json \
+    --device cuda
+
+# 2) Training penuh, from scratch, pakai hasil tuning.
+#    Default optimizer mengikuti paper sec. 4.2: Adam(0.9, 0.999), wd 1e-4,
+#    lr 1e-4 turun 10x tiap 30 epoch, batch 8, 55 epoch.
+python -m wheelchair_nav.scripts.train_ghostdepth_sunrgbd \
+    --splits_dir ./wheelchair_nav/splits_sunrgbd \
+    --log_dir ./wheelchair_nav/log_ghostdepth \
+    --model_name GhostDepth_sunrgbd \
+    --height 192 --width 640 \
+    --min_depth 0.1 --max_depth 10.0 \
+    --num_epochs 55 \
+    --hparams_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json
+```
+
+Checkpoint tersimpan di
+`./wheelchair_nav/log_ghostdepth/GhostDepth_sunrgbd/models/{weights_N,best}/ghostdepth.pth`,
+kurva training di `.../GhostDepth_sunrgbd/training_curve.png` (+ `training_log.csv`).
+
+**Catatan reproduksi (penting kalau angka ini mau dikutip sebagai "Ghost-Depth"):**
+paper menjelaskan arsitektur dalam bentuk prosa, bukan tabel layer, jadi ada
+beberapa detail yang harus disimpulkan. Semuanya didokumentasikan di docstring
+`networks/GhostDepth/ghost_depth.py`, yang utama:
+
+- Jumlah parameter reimplementasi ini **2.79M** (default) atau **2.57M** dengan
+  `--no_final_conv`; paper melaporkan **2.71M**, di antara keduanya -- jadi tidak
+  ada bacaan yang persis. Perbedaannya di apakah `ConvBnAct(160->960)` GhostNet
+  ikut dihitung sebagai "layer klasifikasi" yang dibuang atau tidak.
+- Paper melatih encoder dari **bobot ImageNet**; di repo ini Ghost-Depth dilatih
+  **from scratch**, konsisten dengan RT-MonoDepth dan FastDepth, supaya
+  perbandingannya mengisolasi arsitektur bukan pretraining. **Akurasinya karena
+  itu tidak diharapkan mereproduksi angka paper** (REL 0.149 / δ1 0.797 di
+  NYU-Depth V2 dengan input 228x304).
+
+### 8d. YOLO26n-depth / YOLO26s-depth: tuning lalu training
 
 ```bash
 # 1) Hyperparameter tuning (Optuna, TPE) -- optimizer + bobot loss depth
@@ -522,13 +603,14 @@ Default `--pretrained` kosong (`""`) -> training dari bobot acak
 model lain; isi `--pretrained` dengan path checkpoint kalau memang butuh
 memulai dari bobot tertentu.
 
-### 8d. Jalankan perbandingan apples-to-apples
+### 8e. Jalankan perbandingan apples-to-apples
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_depth_comparison \
     --test_list ./wheelchair_nav/splits_sunrgbd/test.txt \
     --rtmonodepth_weights_dir ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best \
     --fastdepth_weights_dir ./wheelchair_nav/log_fastdepth/FastDepth_sunrgbd/models/best \
+    --ghostdepth_weights_dir ./wheelchair_nav/log_ghostdepth/GhostDepth_sunrgbd/models/best \
     --yolo26n_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26n_depth_sunrgbd/weights/best.pt \
     --yolo26s_depth_weights ./wheelchair_nav/log_yolo_depth/yolo26s_depth_sunrgbd/weights/best.pt \
     --device cuda \
@@ -577,7 +659,13 @@ Semua threshold ada di `wheelchair_nav/config.py`:
   `TPESampler` (Bayesian, Tree-structured Parzen Estimator) dan budget epoch yang
   sengaja lebih kecil dari training penuh -- ini proxy search, bukan pengganti
   training penuh; hasil terbaiknya tetap perlu dilatih ulang dengan
-  `--num_epochs`/`--epochs` penuh di langkah 3/5/8b/8c.
-- FastDepth, YOLO26n-depth, dan YOLO26s-depth (langkah 8) murni model pembanding
-  untuk studi evaluasi; sistem navigasi (`run_navigation.py`) tetap hanya memakai
-  RT-MonoDepth + YOLO26-nano detektor seperti dijelaskan di langkah 1-7.
+  `--num_epochs`/`--epochs` penuh di langkah 3/5/8b/8c/8d.
+- FastDepth, Ghost-Depth, YOLO26n-depth, dan YOLO26s-depth (langkah 8) adalah model
+  pembanding untuk studi evaluasi; sistem navigasi (`run_navigation.py`) secara
+  default tetap memakai RT-MonoDepth + YOLO26-nano detektor seperti dijelaskan di
+  langkah 1-7, tapi `--depth_model` bisa menukar model depth-nya kalau ingin
+  membandingkan dampaknya end-to-end.
+- Ghost-Depth adalah **reimplementasi** dari paper (bukan kode resmi penulisnya, yang
+  tidak dirilis). Beberapa detail arsitektur disimpulkan dari prosa paper dan
+  didokumentasikan di docstring `networks/GhostDepth/ghost_depth.py` -- baca itu dulu
+  sebelum mengutip angkanya sebagai hasil "Ghost-Depth".
