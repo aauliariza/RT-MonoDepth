@@ -25,7 +25,7 @@ shrinking disparity overall rather than by actually smoothing it.
 
 Usage:
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 --batch_size 16
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --batch_size 16
 
 Hyperparameters found by scripts/tune_depth_sunrgbd.py (Optuna, TPE
 sampler) can be applied directly with --hparams_json, which overrides
@@ -33,7 +33,7 @@ sampler) can be applied directly with --hparams_json, which overrides
 with the tuned values before training starts:
 
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 \
+        --splits_dir ./wheelchair_nav/splits_sunrgbd \
         --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ from layers import disp_to_depth, get_smooth_loss  # noqa: E402  (repo root, unm
 from networks.RTMonoDepth.RTMonoDepth import DepthDecoder, DepthEncoder  # noqa: E402  (repo root, unmodified)
 
 from wheelchair_nav.config import (  # noqa: E402
-    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M,
+    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M, TRAIN_EPOCHS,
 )
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.training_log import save_training_curve  # noqa: E402
@@ -137,10 +137,15 @@ def parse_args():
     p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M)
     p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     p.add_argument("--batch_size", type=int, default=16)
-    p.add_argument("--num_epochs", type=int, default=40)
+    p.add_argument("--num_epochs", type=int, default=TRAIN_EPOCHS,
+                    help="Shared across every depth model so the comparison is not "
+                         "confounded by training budget (config.TRAIN_EPOCHS)")
     p.add_argument("--learning_rate", type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=0.0)
-    p.add_argument("--scheduler_step_size", type=int, default=25)
+    p.add_argument("--scheduler_step_size", type=int, default=None,
+                    help="StepLR(gamma=0.1) period. Defaults to num_epochs // 3 so the "
+                         "schedule scales with the budget instead of freezing the tail "
+                         "at lr=1e-7; RT-MonoDepth's original 40-epoch recipe used 25.")
     p.add_argument("--smoothness_weight", type=float, default=1e-3)
     p.add_argument("--si_lambda", type=float, default=0.5, help="scale-invariant log loss weight (Eigen et al.)")
     p.add_argument("--num_workers", type=int, default=8)
@@ -149,6 +154,9 @@ def parse_args():
                     help="JSON from tune_depth_sunrgbd.py ({'best_params': {...}}); overrides "
                          "learning_rate/batch_size/smoothness_weight/si_lambda/weight_decay")
     args = p.parse_args()
+
+    if args.scheduler_step_size is None:
+        args.scheduler_step_size = max(1, args.num_epochs // 3)
 
     if args.hparams_json:
         with open(args.hparams_json, "r") as f:

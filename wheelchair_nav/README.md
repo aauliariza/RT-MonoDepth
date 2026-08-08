@@ -188,6 +188,34 @@ Semua flag `--height/--width/--imgsz` masih bisa ditimpa per perintah; nilai di
 
 ---
 
+## 1c. Budget training: 100 epoch untuk SEMUA model depth
+
+Sama alasannya dengan resolusi: membandingkan model yang dilatih dengan jumlah
+epoch berbeda mencampuradukkan **arsitektur** dengan **budget training**. Resep
+asal tiap model berbeda-beda (RT-MonoDepth/FastDepth 40, Ghost-Depth 55 menurut
+paper sec. 4.2, YOLO26-depth 60), jadi semuanya sekarang memakai satu angka:
+`TRAIN_EPOCHS = 100` di `config.py`. Angka ini cukup longgar -- pada run 100
+epoch, kurva validasi kelima model sudah datar di sepertiga terakhir.
+
+**LR schedule ikut menskala, dan ini penting.** Menaikkan budget tanpa menaikkan
+periode decay justru membuang sisa epoch. Dengan `StepLR(gamma=0.1)`:
+
+| step | Trayektori LR di 100 epoch | Epoch terbuang di lr<1e-6 |
+|---|---|---|
+| 25 (lama) | `1e-4 / 1e-5 / 1e-6 / 1e-7` | **25** |
+| 30 (lama, Ghost-Depth) | `1e-4 / 1e-5 / 1e-6 / 1e-7` | **10** |
+| **33 = 100//3 (sekarang)** | `1e-4 / 1e-5 / 1e-6 / 1e-7` | **1** |
+
+Karena itu `--scheduler_step_size` sekarang default `None` -> dihitung otomatis
+sebagai `num_epochs // 3`. Kalau Anda mengubah `--num_epochs`, step-nya ikut
+menyesuaikan; kalau Anda mengisi `--scheduler_step_size` eksplisit (mis. `30`
+untuk mereplikasi resep paper Ghost-Depth persis), nilai Anda tetap dipakai.
+
+Semua ini hanya default. `--num_epochs` / `--epochs` tetap bisa ditimpa per
+perintah.
+
+---
+
 ## 2. Hyperparameter tuning RT-MonoDepth (Optuna, TPE sampler)
 
 Dijalankan **sebelum** training penuh di langkah 3. `scripts/tune_depth_sunrgbd.py`
@@ -260,7 +288,6 @@ python -m wheelchair_nav.scripts.train_depth_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
     --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
-    --num_epochs 40 \
     --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 ```
 
@@ -273,7 +300,7 @@ python -m wheelchair_nav.scripts.train_depth_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
     --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
-    --batch_size 16 --num_epochs 40 --learning_rate 1e-4
+    --batch_size 16 --learning_rate 1e-4
 ```
 
 Checkpoint tiap epoch + checkpoint terbaik (val L1 terendah) disimpan di
@@ -532,7 +559,6 @@ python -m wheelchair_nav.scripts.train_fastdepth_sunrgbd \
     --model_name FastDepth_sunrgbd \
     --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
-    --num_epochs 40 \
     --hparams_json ./wheelchair_nav/log_fastdepth/optuna_best_fastdepth_hparams.json
 ```
 
@@ -588,7 +614,6 @@ python -m wheelchair_nav.scripts.train_ghostdepth_sunrgbd \
     --model_name GhostDepth_sunrgbd \
     --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
-    --num_epochs 55 \
     --hparams_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json
 ```
 
@@ -627,7 +652,7 @@ python -m wheelchair_nav.scripts.tune_yolo_depth \
 python -m wheelchair_nav.scripts.train_yolo_depth \
     --variant n \
     --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
-    --epochs 60 --imgsz 384 --batch 16 --device 0 \
+    --imgsz 384 --batch 16 --device 0 \
     --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 ```
 

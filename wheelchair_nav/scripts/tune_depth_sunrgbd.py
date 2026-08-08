@@ -16,7 +16,7 @@ directly onto train_depth_sunrgbd.py's CLI flags, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_depth_sunrgbd \
-        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 40 \
+        --splits_dir ./wheelchair_nav/splits_sunrgbd \
         --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
 
 Usage:

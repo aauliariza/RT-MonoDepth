@@ -46,6 +46,25 @@ INPUT_WIDTH = 384
 YOLO_DEPTH_IMGSZ = 384
 
 # ---------------------------------------------------------------------------
+# Training budget shared by every depth model, for the same reason the input
+# resolution is shared: a comparison across models trained for different
+# numbers of epochs confounds architecture with budget.
+#
+# The per-model source recipes disagree (RT-MonoDepth/FastDepth 40 epochs,
+# Ghost-Depth 55 per its paper sec. 4.2, YOLO26-depth 60), so this picks one
+# budget generous enough that all of them have plateaued well before the end
+# -- verified on the 100-epoch runs, where every model's validation curve is
+# flat over the final third.
+#
+# The LR step size is NOT fixed here: scaling the budget without scaling the
+# schedule wastes it. StepLR(gamma=0.1) at the old step=25 spends the last 25
+# of 100 epochs at lr=1e-7, i.e. frozen. The trainers therefore default
+# scheduler_step_size to num_epochs // 3, which keeps two meaningful decays
+# regardless of the budget.
+# ---------------------------------------------------------------------------
+TRAIN_EPOCHS = 100
+
+# ---------------------------------------------------------------------------
 # Obstacle List (perception fusion): depth_m = median(depth_map[bbox_inner_ROI])
 # ---------------------------------------------------------------------------
 BBOX_INNER_RATIO = 0.6  # shrink each bbox to its central 60% before taking the median depth

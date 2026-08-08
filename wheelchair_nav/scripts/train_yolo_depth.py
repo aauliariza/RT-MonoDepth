@@ -12,13 +12,13 @@ pattern as scripts/train_yolo_obstacle.py.
 
 Usage:
     python -m wheelchair_nav.scripts.train_yolo_depth \
-        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml --epochs 60
+        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml
 
 Hyperparameters found by scripts/tune_yolo_depth.py (Optuna, TPE sampler)
 can be applied directly with --hparams_json:
 
     python -m wheelchair_nav.scripts.train_yolo_depth \
-        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml --epochs 60 \
+        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
         --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ import json
 
 from ultralytics import YOLO
 
-from wheelchair_nav.config import YOLO_DEPTH_IMGSZ  # noqa: E402
+from wheelchair_nav.config import TRAIN_EPOCHS, YOLO_DEPTH_IMGSZ  # noqa: E402
 
 
 def parse_args():
@@ -38,7 +38,9 @@ def parse_args():
     p.add_argument("--pretrained", default="",
                     help="Empty (default) trains from random init (yolo26{variant}-depth.yaml) -- "
                          "no pretrained checkpoint is used unless a path is passed explicitly")
-    p.add_argument("--epochs", type=int, default=60)
+    p.add_argument("--epochs", type=int, default=TRAIN_EPOCHS,
+                    help="Shared across every depth model so the comparison is not "
+                         "confounded by training budget (config.TRAIN_EPOCHS)")
     p.add_argument("--imgsz", type=int, default=YOLO_DEPTH_IMGSZ,
                     help="Ultralytics letterboxes into imgsz x imgsz; 384 puts a "
                          "640x480 frame on exactly 288x384 of real content, matching "

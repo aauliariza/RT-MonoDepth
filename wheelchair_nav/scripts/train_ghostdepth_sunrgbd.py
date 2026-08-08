@@ -12,8 +12,10 @@ is as close to Ghost-Depth as the SUN RGB-D setting allows:
     objective the other depth models in this repo train with, so
     --loss is provided to switch if you want to ablate that difference.
   - Adam with beta1=0.9, beta2=0.999, weight_decay=1e-4, initial LR 1e-4
-    decayed to 10% every 30 epochs, batch size 8 (paper sec. 4.2).
-    Those are the defaults below.
+    batch size 8 (paper sec. 4.2). Those are the defaults below.
+    The paper's 55-epoch / 30-step schedule is NOT the default: every
+    depth model here shares config.TRAIN_EPOCHS so the comparison is not
+    confounded by budget, and the LR step scales to num_epochs // 3.
 
 Two deliberate departures from the paper, both to keep the comparison in
 evaluation/eval_depth_comparison.py apples-to-apples:
@@ -34,13 +36,13 @@ neighbour -- rather than upsampling the prediction.
 
 Usage:
     python -m wheelchair_nav.scripts.train_ghostdepth_sunrgbd \
-        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 55 --batch_size 8
+        --splits_dir ./wheelchair_nav/splits_sunrgbd --batch_size 8
 
 Hyperparameters found by scripts/tune_ghostdepth_sunrgbd.py (Optuna, TPE
 sampler) can be applied directly with --hparams_json:
 
     python -m wheelchair_nav.scripts.train_ghostdepth_sunrgbd \
-        --splits_dir ./wheelchair_nav/splits_sunrgbd --num_epochs 55 \
+        --splits_dir ./wheelchair_nav/splits_sunrgbd \
         --hparams_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json
 """
 from __future__ import annotations
@@ -63,7 +65,7 @@ from layers import get_smooth_loss  # noqa: E402  (repo root, unmodified)
 from networks.GhostDepth.ghost_depth import GhostDepth  # noqa: E402
 
 from wheelchair_nav.config import (  # noqa: E402
-    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M,
+    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M, TRAIN_EPOCHS,
 )
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.scripts.train_depth_sunrgbd import masked_l1, scale_invariant_log_loss  # noqa: E402
@@ -141,10 +143,15 @@ def parse_args():
     p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     # Paper sec. 4.2: batch 8, Adam(0.9, 0.999), wd 1e-4, lr 1e-4 /10 every 30, 55 epochs.
     p.add_argument("--batch_size", type=int, default=8)
-    p.add_argument("--num_epochs", type=int, default=55)
+    p.add_argument("--num_epochs", type=int, default=TRAIN_EPOCHS,
+                    help="Shared across every depth model so the comparison is not "
+                         "confounded by training budget (config.TRAIN_EPOCHS)")
     p.add_argument("--learning_rate", type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=1e-4)
-    p.add_argument("--scheduler_step_size", type=int, default=30)
+    p.add_argument("--scheduler_step_size", type=int, default=None,
+                    help="StepLR(gamma=0.1) period. Defaults to num_epochs // 3 so the "
+                         "schedule scales with the budget instead of freezing the tail "
+                         "at lr=1e-7; the Ghost-Depth paper (sec. 4.2) used 30 with 55 epochs.")
     p.add_argument("--beta1", type=float, default=0.9)
     p.add_argument("--beta2", type=float, default=0.999)
     p.add_argument("--loss", choices=["berhu", "l1_silog"], default="berhu",
@@ -167,6 +174,9 @@ def parse_args():
                     help="JSON from tune_ghostdepth_sunrgbd.py ({'best_params': {...}}); overrides "
                          "learning_rate/batch_size/weight_decay/berhu_c_frac")
     args = p.parse_args()
+
+    if args.scheduler_step_size is None:
+        args.scheduler_step_size = max(1, args.num_epochs // 3)
 
     if args.hparams_json:
         with open(args.hparams_json, "r") as f:

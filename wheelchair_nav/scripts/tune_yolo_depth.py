@@ -17,7 +17,7 @@ directly onto Ultralytics' model.train() kwargs, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_yolo_depth \
-        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml --epochs 60 \
+        --variant n --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
         --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 
 Usage:
