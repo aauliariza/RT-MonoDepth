@@ -129,6 +129,66 @@ def build_estimators(args):
     return estimators
 
 
+def count_macs_g(estimator):
+    """Multiply-accumulate operations per forward pass, in billions, at the
+    estimator's own feed resolution.
+
+    Reported alongside parameter count because the two measure different
+    costs and can disagree sharply: parameters are memory, MACs are
+    arithmetic, and a network can be modest in one and expensive in the
+    other. NetScore (Wong, 2018) weighs both.
+
+    Returns None if thop is missing or the estimator's backing module
+    can't be resolved -- the column is then left blank rather than
+    failing the whole evaluation.
+    """
+    import torch
+    import torch.nn as nn
+
+    try:
+        from thop import profile
+    except ImportError:
+        return None
+
+    class Wrapped(nn.Module):
+        """Presents whatever the estimator holds as one profileable module."""
+
+        def __init__(self, estimator):
+            super().__init__()
+            if hasattr(estimator, "encoder") and hasattr(estimator, "decoder"):
+                self.encoder = estimator.encoder          # RT-MonoDepth
+                self.decoder = estimator.decoder
+            elif hasattr(estimator.model, "model"):
+                self.net = estimator.model.model          # YOLO26{n,s}-depth
+            else:
+                self.net = estimator.model                # FastDepth, Ghost-Depth
+
+        def forward(self, x):
+            if hasattr(self, "encoder"):
+                return self.decoder(self.encoder(x))
+            return self.net(x)
+
+    try:
+        wrapped = Wrapped(estimator)
+        # thop.profile() saves model.training on entry and RESTORES it on
+        # exit. A freshly constructed wrapper defaults to training=True, so
+        # without this eval() the restore would flip the estimator's real
+        # module into training mode -- corrupting the FPS measurement and
+        # every later inference (BatchNorm would update running stats, and
+        # Ghost-Depth's iAFF would crash outright on batch size 1).
+        wrapped.eval()
+
+        h = getattr(estimator, "feed_height", None) or getattr(estimator, "imgsz", 640)
+        w = getattr(estimator, "feed_width", None) or getattr(estimator, "imgsz", 640)
+        device = next(wrapped.parameters()).device
+        x = torch.randn(1, 3, int(h), int(w), device=device)
+        with torch.no_grad():
+            macs, _ = profile(wrapped, inputs=(x,), verbose=False)
+    except Exception:
+        return None
+    return macs / 1e9
+
+
 def evaluate_model(name: str, estimator, pairs, args):
     errors = []
     for rgb_path, depth_path in pairs:
@@ -154,6 +214,7 @@ def evaluate_model(name: str, estimator, pairs, args):
 
     mean_errors = np.array(errors).mean(0)
     n_params = estimator.num_parameters()
+    macs_g = count_macs_g(estimator)
 
     # FPS: warmup + averaged repeated inference on the first test frame,
     # same protocol as eval_depth_metrics.py / compare_runtime.py.
@@ -177,13 +238,16 @@ def evaluate_model(name: str, estimator, pairs, args):
         "a2": mean_errors[5],
         "a3": mean_errors[6],
         "params_m": n_params / 1e6,
+        "macs_g": macs_g,
         "fps": fps,
     }
 
 
 def print_table(rows):
-    cols = ["model", "n_images", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3", "params_m", "fps"]
-    headers = ["Model", "N", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3", "Params(M)", "FPS"]
+    cols = ["model", "n_images", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3",
+            "params_m", "macs_g", "fps"]
+    headers = ["Model", "N", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3",
+               "Params(M)", "GMACs", "FPS"]
     widths = [max(len(h), 12) for h in headers]
     widths[0] = max(widths[0], max(len(r["model"]) for r in rows) + 2)
 
@@ -197,7 +261,9 @@ def print_table(rows):
             r["model"], r["n_images"],
             f"{r['abs_rel']:.4f}", f"{r['sq_rel']:.4f}", f"{r['rmse']:.4f}", f"{r['rmse_log']:.4f}",
             f"{r['a1']:.4f}", f"{r['a2']:.4f}", f"{r['a3']:.4f}",
-            f"{r['params_m']:.3f}", f"{r['fps']:.1f}",
+            f"{r['params_m']:.3f}",
+            "n/a" if r["macs_g"] is None else f"{r['macs_g']:.3f}",
+            f"{r['fps']:.1f}",
         ]
         print(fmt_row(values))
 

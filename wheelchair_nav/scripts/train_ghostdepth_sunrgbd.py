@@ -179,6 +179,19 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # iAFF's global attention branch is BatchNorm applied after a global
+    # average pool, so its input is 1x1 spatially and BatchNorm has only
+    # the batch axis left to estimate variance over. PyTorch raises a
+    # confusing "Expected more than 1 value per channel" deep inside the
+    # model for batch_size=1; catch it here with an actionable message.
+    if args.batch_size < 2:
+        raise SystemExit(
+            f"--batch_size must be >= 2 (got {args.batch_size}): Ghost-Depth's iAFF module "
+            "applies BatchNorm to globally-pooled features, which cannot compute a variance "
+            "from a single sample. Use --batch_size 2 or higher."
+        )
+
     device = torch.device(args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu")
     print(f"Training on {device}")
 
