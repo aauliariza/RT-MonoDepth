@@ -85,66 +85,86 @@ def objective_factory(args, device: torch.device):
 
         # Fresh, randomly-initialized model per trial -- same "from scratch"
         # convention as the full training run.
-        model = GhostDepth(
-            width=args.width_mult,
-            iaff_channels=args.iaff_channels,
-            keep_final_conv=not args.no_final_conv,
-        ).to(device)
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=learning_rate,
-            betas=(args.beta1, args.beta2), weight_decay=weight_decay,
-        )
+        # Pre-bound so the finally block's del cannot raise NameError and
+        # mask an OOM raised by the model construction itself.
+        model = optimizer = None
+        try:
+            model = GhostDepth(
+                width=args.width_mult,
+                iaff_channels=args.iaff_channels,
+                keep_final_conv=not args.no_final_conv,
+            ).to(device)
+            optimizer = torch.optim.Adam(
+                model.parameters(), lr=learning_rate,
+                betas=(args.beta1, args.beta2), weight_decay=weight_decay,
+            )
 
-        val_loss = float("inf")
-        for epoch in range(args.epochs_per_trial):
-            model.train()
-            for batch in train_loader:
-                color = batch["color"].to(device)
-                depth_gt = batch["depth_gt"].to(device)
-                valid = batch["valid_mask"].to(device)
-
-                raw = model(color)
-                depth_pred = raw.clamp(args.min_depth, args.max_depth)
-
-                # Ghost-Depth predicts at half resolution -- bring targets down to it.
-                size = raw.shape[-2:]
-                depth_gt_s = F.interpolate(depth_gt, size=size, mode="nearest")
-                valid_s = F.interpolate(valid, size=size, mode="nearest")
-
-                if args.loss == "berhu":
-                    loss = berhu_loss(depth_pred, depth_gt_s, valid_s, c_frac=berhu_c_frac)
-                else:
-                    color_s = F.interpolate(color, size=size, mode="bilinear", align_corners=False)
-                    loss = (
-                        masked_l1(depth_pred, depth_gt_s, valid_s)
-                        + scale_invariant_log_loss(depth_pred, depth_gt_s, valid_s, lam=si_lambda)
-                        + smoothness_weight * get_smooth_loss(raw, color_s)
-                    )
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            model.eval()
-            val_loss, n_batches = 0.0, 0
-            with torch.no_grad():
-                for batch in val_loader:
+            val_loss = float("inf")
+            for epoch in range(args.epochs_per_trial):
+                model.train()
+                for batch in train_loader:
                     color = batch["color"].to(device)
                     depth_gt = batch["depth_gt"].to(device)
                     valid = batch["valid_mask"].to(device)
+
                     raw = model(color)
-                    depth_pred = F.interpolate(
-                        raw, size=depth_gt.shape[-2:], mode="bilinear", align_corners=False,
-                    ).clamp(args.min_depth, args.max_depth)
-                    val_loss += masked_l1(depth_pred, depth_gt, valid).item()
-                    n_batches += 1
-            val_loss /= max(1, n_batches)
+                    depth_pred = raw.clamp(args.min_depth, args.max_depth)
 
-            trial.report(val_loss, epoch)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
+                    # Ghost-Depth predicts at half resolution -- bring targets down to it.
+                    size = raw.shape[-2:]
+                    depth_gt_s = F.interpolate(depth_gt, size=size, mode="nearest")
+                    valid_s = F.interpolate(valid, size=size, mode="nearest")
 
-        return val_loss
+                    if args.loss == "berhu":
+                        loss = berhu_loss(depth_pred, depth_gt_s, valid_s, c_frac=berhu_c_frac)
+                    else:
+                        color_s = F.interpolate(color, size=size, mode="bilinear", align_corners=False)
+                        loss = (
+                            masked_l1(depth_pred, depth_gt_s, valid_s)
+                            + scale_invariant_log_loss(depth_pred, depth_gt_s, valid_s, lam=si_lambda)
+                            + smoothness_weight * get_smooth_loss(raw, color_s)
+                        )
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                model.eval()
+                val_loss, n_batches = 0.0, 0
+                with torch.no_grad():
+                    for batch in val_loader:
+                        color = batch["color"].to(device)
+                        depth_gt = batch["depth_gt"].to(device)
+                        valid = batch["valid_mask"].to(device)
+                        raw = model(color)
+                        depth_pred = F.interpolate(
+                            raw, size=depth_gt.shape[-2:], mode="bilinear", align_corners=False,
+                        ).clamp(args.min_depth, args.max_depth)
+                        val_loss += masked_l1(depth_pred, depth_gt, valid).item()
+                        n_batches += 1
+                val_loss /= max(1, n_batches)
+
+                trial.report(val_loss, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            return val_loss
+        except torch.OutOfMemoryError:
+            # The batch_size search space deliberately probes sizes that may
+            # not fit this GPU. Prune that trial instead of aborting the whole
+            # study, so the search simply learns to avoid those sizes.
+            print(f"  trial {trial.number}: CUDA OOM at batch_size={batch_size}, pruning")
+            raise optuna.TrialPruned()
+        finally:
+            # Optuna keeps a reference to whatever the objective leaves
+            # alive, so N trials would otherwise stack N models on the GPU.
+            # Dropping them and emptying the cache here also stops the CUDA
+            # allocator fragmenting across trials of differing batch size --
+            # the exact failure mode the OOM message warns about. The finally
+            # block matters because TrialPruned exits by exception.
+            del model, optimizer, train_loader, val_loader
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
     return objective
 

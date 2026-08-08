@@ -81,55 +81,75 @@ def objective_factory(args, device: torch.device):
 
         # Fresh, randomly-initialized model per trial -- same "from scratch"
         # requirement as the full training run.
-        encoder = DepthEncoder().to(device)
-        decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(device)
-        params = list(encoder.parameters()) + list(decoder.parameters())
-        optimizer = torch.optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay)
+        # Pre-bound so the finally block's del cannot raise NameError and
+        # mask an OOM raised by the model construction itself.
+        encoder = decoder = params = optimizer = None
+        try:
+            encoder = DepthEncoder().to(device)
+            decoder = DepthDecoder(num_ch_enc=encoder.num_ch_enc).to(device)
+            params = list(encoder.parameters()) + list(decoder.parameters())
+            optimizer = torch.optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay)
 
-        # Same loss compute_multiscale_loss() uses in train_depth_sunrgbd.py
-        # (all 4 decoder scales, mean-normalized smoothness) -- otherwise a
-        # trial would be scored under a different objective than the one
-        # the tuned hyperparameters actually get used for.
-        loss_args = SimpleNamespace(
-            min_depth=args.min_depth, max_depth=args.max_depth,
-            si_lambda=si_lambda, smoothness_weight=smoothness_weight,
-        )
+            # Same loss compute_multiscale_loss() uses in train_depth_sunrgbd.py
+            # (all 4 decoder scales, mean-normalized smoothness) -- otherwise a
+            # trial would be scored under a different objective than the one
+            # the tuned hyperparameters actually get used for.
+            loss_args = SimpleNamespace(
+                min_depth=args.min_depth, max_depth=args.max_depth,
+                si_lambda=si_lambda, smoothness_weight=smoothness_weight,
+            )
 
-        val_loss = float("inf")
-        for epoch in range(args.epochs_per_trial):
-            encoder.train()
-            decoder.train()
-            for batch in train_loader:
-                color = batch["color"].to(device)
-                depth_gt = batch["depth_gt"].to(device)
-                valid = batch["valid_mask"].to(device)
-
-                outputs = decoder(encoder(color))
-                loss = compute_multiscale_loss(outputs, color, depth_gt, valid, loss_args)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            encoder.eval()
-            decoder.eval()
-            val_loss, n_batches = 0.0, 0
-            with torch.no_grad():
-                for batch in val_loader:
+            val_loss = float("inf")
+            for epoch in range(args.epochs_per_trial):
+                encoder.train()
+                decoder.train()
+                for batch in train_loader:
                     color = batch["color"].to(device)
                     depth_gt = batch["depth_gt"].to(device)
                     valid = batch["valid_mask"].to(device)
+
                     outputs = decoder(encoder(color))
-                    _, depth_pred = disp_to_depth(outputs[("disp", 0)], args.min_depth, args.max_depth)
-                    val_loss += masked_l1(depth_pred, depth_gt, valid).item()
-                    n_batches += 1
-            val_loss /= max(1, n_batches)
+                    loss = compute_multiscale_loss(outputs, color, depth_gt, valid, loss_args)
 
-            trial.report(val_loss, epoch)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-        return val_loss
+                encoder.eval()
+                decoder.eval()
+                val_loss, n_batches = 0.0, 0
+                with torch.no_grad():
+                    for batch in val_loader:
+                        color = batch["color"].to(device)
+                        depth_gt = batch["depth_gt"].to(device)
+                        valid = batch["valid_mask"].to(device)
+                        outputs = decoder(encoder(color))
+                        _, depth_pred = disp_to_depth(outputs[("disp", 0)], args.min_depth, args.max_depth)
+                        val_loss += masked_l1(depth_pred, depth_gt, valid).item()
+                        n_batches += 1
+                val_loss /= max(1, n_batches)
+
+                trial.report(val_loss, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            return val_loss
+        except torch.OutOfMemoryError:
+            # The batch_size search space deliberately probes sizes that may
+            # not fit this GPU. Prune that trial instead of aborting the whole
+            # study, so the search simply learns to avoid those sizes.
+            print(f"  trial {trial.number}: CUDA OOM at batch_size={batch_size}, pruning")
+            raise optuna.TrialPruned()
+        finally:
+            # Optuna keeps a reference to whatever the objective leaves
+            # alive, so N trials would otherwise stack N models on the GPU.
+            # Dropping them and emptying the cache here also stops the CUDA
+            # allocator fragmenting across trials of differing batch size --
+            # the exact failure mode the OOM message warns about. The finally
+            # block matters because TrialPruned exits by exception.
+            del encoder, decoder, params, optimizer, train_loader, val_loader
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
     return objective
 
