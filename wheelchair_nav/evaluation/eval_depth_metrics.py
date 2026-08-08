@@ -25,6 +25,7 @@ if _REPO_ROOT not in sys.path:
 
 from layers import disp_to_depth  # noqa: E402  (repo root, unmodified)
 
+from wheelchair_nav.config import MAX_DEPTH_M, MIN_DEPTH_M  # noqa: E402
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.perception.depth_estimator import DepthEstimator  # noqa: E402
 
@@ -46,8 +47,8 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights_dir", required=True, help="Folder with encoder.pth + depth.pth")
     p.add_argument("--test_list", default="./wheelchair_nav/splits_sunrgbd/test.txt")
-    p.add_argument("--min_depth", type=float, default=0.1)
-    p.add_argument("--max_depth", type=float, default=10.0)
+    p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M)
+    p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     p.add_argument("--device", default="cuda")
     p.add_argument("--fps_cycles", type=int, default=200)
     p.add_argument("--fps_warmup", type=int, default=20)

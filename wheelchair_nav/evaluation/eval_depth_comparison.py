@@ -326,7 +326,9 @@ def parse_args():
         try:
             h, w = (int(v) for v in args.macs_ref_hw.lower().split("x"))
         except ValueError:
-            raise SystemExit(f"--macs_ref_hw must look like 192x640, got {args.macs_ref_hw!r}")
+            raise SystemExit(
+                f"--macs_ref_hw must look like {INPUT_HEIGHT}x{INPUT_WIDTH}, "
+                f"got {args.macs_ref_hw!r}")
         args.macs_ref_hw = (h, w)
     else:
         args.macs_ref_hw = None

@@ -18,6 +18,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+from wheelchair_nav.config import INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M
+
 
 def _read_split(list_path: str) -> List[Tuple[str, str]]:
     pairs = []
@@ -39,10 +41,10 @@ class SUNRGBDDepthDataset(Dataset):
     def __init__(
         self,
         list_path: str,
-        height: int = 192,
-        width: int = 640,
-        min_depth: float = 0.1,
-        max_depth: float = 10.0,
+        height: int = INPUT_HEIGHT,
+        width: int = INPUT_WIDTH,
+        min_depth: float = MIN_DEPTH_M,
+        max_depth: float = MAX_DEPTH_M,
         is_train: bool = True,
     ):
         self.pairs = _read_split(list_path)

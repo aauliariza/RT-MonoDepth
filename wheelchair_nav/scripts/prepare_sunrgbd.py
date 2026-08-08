@@ -54,6 +54,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+from wheelchair_nav.config import MAX_DEPTH_M
+
 
 def _decode_depth_png(depth_png: np.ndarray, encoding: str) -> np.ndarray:
     if encoding == "bitshift":
@@ -365,7 +367,7 @@ def parse_args():
                          help="Also mirror the train/val/test split into the images/+depth/ layout "
                               "used by YOLO26n-depth/YOLO26s-depth (baselines/yolo_depth_estimator.py)")
     parser.add_argument("--yolo_depth_out_dir", default="./wheelchair_nav/data/sunrgbd_yolo_depth")
-    parser.add_argument("--max_depth", type=float, default=10.0,
+    parser.add_argument("--max_depth", type=float, default=MAX_DEPTH_M,
                          help="Written into depth_comparison.yaml so DepthValidator's metric range matches")
     return parser.parse_args()
 

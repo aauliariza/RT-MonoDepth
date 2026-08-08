@@ -42,7 +42,9 @@ if _REPO_ROOT not in sys.path:
 from layers import get_smooth_loss  # noqa: E402  (repo root, unmodified)
 from networks.FastDepth.model import MobileNetSkipAdd  # noqa: E402  (repo root, unmodified)
 
-from wheelchair_nav.config import INPUT_HEIGHT, INPUT_WIDTH  # noqa: E402
+from wheelchair_nav.config import (  # noqa: E402
+    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M,
+)
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.scripts.train_depth_sunrgbd import masked_l1, scale_invariant_log_loss  # noqa: E402
 from wheelchair_nav.training_log import save_training_curve  # noqa: E402
@@ -63,8 +65,8 @@ def parse_args():
     p.add_argument("--model_name", default="FastDepth_sunrgbd")
     p.add_argument("--height", type=int, default=INPUT_HEIGHT)
     p.add_argument("--width", type=int, default=INPUT_WIDTH)
-    p.add_argument("--min_depth", type=float, default=0.1)
-    p.add_argument("--max_depth", type=float, default=10.0)
+    p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M)
+    p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--num_epochs", type=int, default=40)
     p.add_argument("--learning_rate", type=float, default=1e-4)

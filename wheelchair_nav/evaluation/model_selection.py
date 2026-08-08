@@ -143,22 +143,41 @@ def read_rows(csv_path: str, macs_column: str = "auto"):
         )
         print(warning)
 
+    # Every criterion has to be strictly positive: information density and
+    # NetScore both divide by / take the log of these, so a zero anywhere
+    # yields inf/NaN rather than a ranking. A model can legitimately score
+    # a1 = 0 (it really is that bad), so say exactly which column dropped
+    # it instead of silently reporting a shorter table.
     usable, skipped = [], []
     for r in rows:
-        try:
-            values = [float(r[c]) for c in criteria]
-        except (TypeError, ValueError):
-            skipped.append(r["model"])
-            continue
-        if any(v <= 0 for v in values):
-            skipped.append(r["model"])
+        bad = None
+        values = []
+        for c in criteria:
+            try:
+                v = float(r[c])
+            except (TypeError, ValueError):
+                bad = f"{c}=missing"
+                break
+            if v <= 0:
+                bad = f"{c}={v:g}"
+                break
+            values.append(v)
+        if bad:
+            skipped.append((r["model"], bad))
             continue
         usable.append((r["model"], np.array(values)))
 
     if skipped:
-        print(f"Skipped (missing/non-positive criterion values): {', '.join(skipped)}\n")
+        print("Skipped -- every criterion must be > 0 for information density / NetScore:")
+        for name, why in skipped:
+            print(f"  {name}: {why}")
+        print()
     if len(usable) < 2:
-        raise SystemExit("Need at least 2 fully-populated models to compare.")
+        raise SystemExit(
+            f"Only {len(usable)} of {len(rows)} models are scorable; need at least 2. "
+            "A criterion of 0 usually means that model is genuinely untrained/degenerate "
+            "(e.g. a1=0 -> not a single pixel within the 1.25 threshold)."
+        )
 
     names = [n for n, _ in usable]
     X = np.vstack([v for _, v in usable])
