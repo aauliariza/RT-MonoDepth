@@ -67,8 +67,10 @@ wheelchair_nav/
     eval_navigation_metrics.py        FPS pipeline, missed/false-stop rate,
                                        decision accuracy, distance MAE/RMSE
     eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs Ghost-Depth vs
-                                       YOLO26{n,s}-depth, metrik+params+FPS identik,
-                                       test split identik
+                                       YOLO26{n,s}-depth, metrik+params+GMACs+FPS
+                                       identik, test split identik
+    model_selection.py                pilih model "paling worth it": Pareto / information
+                                       density / NetScore / TOPSIS (lihat langkah 8f)
   requirements.txt
 ```
 
@@ -619,9 +621,40 @@ python -m wheelchair_nav.evaluation.eval_depth_comparison \
 
 Boleh isi hanya sebagian flag `--*_weights*` -- model yang tidak diberi bobotnya
 otomatis dilewati. Mencetak satu tabel berisi `abs_rel, sq_rel, rmse, rmse_log, a1,
-a2, a3, Params(M), FPS` untuk tiap model yang diberikan, dihitung di atas **gambar
-test yang sama** dan **rumus metrik yang sama** -- juga disimpan ke
-`--out_csv` bila diisi.
+a2, a3, Params(M), GMACs, GMACs@ref, FeedHxW, FPS` untuk tiap model yang diberikan,
+dihitung di atas **gambar test yang sama** dan **rumus metrik yang sama** -- juga
+disimpan ke `--out_csv` bila diisi.
+
+**Soal dua kolom GMACs.** Tiap keluarga model jalan di resolusi berbeda: model depth
+di sini di-*feed* 192x640 (resolusi training-nya), sedangkan model depth Ultralytics
+di-*feed* `imgsz x imgsz` (default 640x640) -- **3.3x lebih banyak piksel**. Karena
+MACs *dan* FPS sama-sama berskala dengan jumlah piksel, satu kolom MACs saja akan
+diam-diam membandingkan beban kerja yang berbeda. Karena itu tabelnya melaporkan:
+
+- `GMACs` -- di resolusi *as-deployed* tiap model (biaya nyata saat dijalankan)
+- `GMACs@ref` -- semua model di **satu** resolusi yang sama (`--macs_ref_hw`,
+  default `192x640`), jadi bisa dipakai membandingkan **arsitektur**
+- `FeedHxW` -- resolusi yang benar-benar dipakai, supaya tabelnya self-documenting
+
+Pakai `--macs_ref_hw none` kalau hanya ingin kolom *as-deployed*.
+
+### 8f. Pilih model paling "worth it" (analisis multi-kriteria)
+
+```bash
+python -m wheelchair_nav.evaluation.model_selection \
+    --csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv
+```
+
+Menjalankan empat metode bersitasi jurnal di atas tabel langkah 8e, dari asumsi
+paling lemah ke paling kuat: **Pareto frontier** (Bianco et al., IEEE Access 2018),
+**information density** (Canziani et al. 2016), **NetScore** (Wong 2018), dan
+**TOPSIS** (Hwang & Yoon 1981) atas 4 skenario bobot sebagai analisis sensitivitas.
+Rumus + sitasi lengkap ada di docstring `evaluation/model_selection.py`.
+
+Secara default ia memakai kolom `macs_g_ref` (resolusi seragam). Kalau CSV-nya hanya
+punya `macs_g` dengan resolusi campur, script mencetak **WARNING** dan menjelaskan
+bahwa NetScore akan menghukum model beresolusi lebih tinggi -- regenerate CSV-nya
+dengan `--macs_ref_hw 192x640`. Paksa kolom tertentu lewat `--macs_column`.
 
 ---
 

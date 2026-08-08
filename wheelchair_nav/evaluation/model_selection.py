@@ -91,24 +91,54 @@ WEIGHT_SCENARIOS = {
 }
 
 
-def read_rows(csv_path: str):
+def read_rows(csv_path: str, macs_column: str = "auto"):
+    """Loads the comparison table and returns (names, X, macs_col_used).
+
+    MACs are read from `macs_g_ref` when available -- every model measured
+    at one common resolution, so the column compares architectures. The
+    as-deployed `macs_g` column is NOT comparable across models here,
+    because the Ultralytics depth models run at imgsz x imgsz (640x640 by
+    default) while the others run at 192x640, i.e. 3.3x more pixels; using
+    it silently penalises the higher-resolution models. Falling back to it
+    is allowed but warned about loudly.
+    """
     with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
     if not rows:
         raise SystemExit(f"No rows in {csv_path}")
 
-    missing = [c for c in CRITERIA if c not in rows[0]]
+    header = rows[0]
+    if macs_column == "auto":
+        macs_col = "macs_g_ref" if any(r.get("macs_g_ref") for r in rows) else "macs_g"
+    else:
+        macs_col = macs_column
+    if macs_col not in header:
+        raise SystemExit(f"{csv_path} has no '{macs_col}' column.")
+
+    criteria = {(macs_col if c == "macs_g" else c): h for c, h in CRITERIA.items()}
+    missing = [c for c in criteria if c not in header]
     if missing:
         raise SystemExit(
             f"{csv_path} is missing column(s): {', '.join(missing)}. "
             "Regenerate it with evaluation/eval_depth_comparison.py --out_csv "
-            "(the macs_g column needs thop installed)."
+            "(the MACs columns need thop installed)."
         )
+
+    if macs_col == "macs_g":
+        feeds = {r.get("feed_hw") for r in rows if r.get("feed_hw")}
+        warning = (
+            "WARNING: using as-deployed 'macs_g'. "
+            + (f"Models run at differing resolutions ({', '.join(sorted(feeds))}), so these "
+               "MACs are NOT architecture-comparable and NetScore will penalise the "
+               "higher-resolution models. " if len(feeds) > 1 else "")
+            + "Regenerate the CSV with --macs_ref_hw 192x640 for a comparable column.\n"
+        )
+        print(warning)
 
     usable, skipped = [], []
     for r in rows:
         try:
-            values = [float(r[c]) for c in CRITERIA]
+            values = [float(r[c]) for c in criteria]
         except (TypeError, ValueError):
             skipped.append(r["model"])
             continue
@@ -124,7 +154,7 @@ def read_rows(csv_path: str):
 
     names = [n for n, _ in usable]
     X = np.vstack([v for _, v in usable])
-    return names, X
+    return names, X, list(criteria), macs_col
 
 
 def pareto_front(X: np.ndarray, higher_is_better: np.ndarray):
@@ -169,16 +199,21 @@ def main():
     p.add_argument("--alpha", type=float, default=2.0, help="NetScore accuracy exponent")
     p.add_argument("--beta", type=float, default=0.5, help="NetScore parameter exponent")
     p.add_argument("--gamma", type=float, default=0.5, help="NetScore MAC exponent")
+    p.add_argument("--macs_column", choices=["auto", "macs_g_ref", "macs_g"], default="auto",
+                   help="Which MACs column to score on. 'auto' (default) prefers the "
+                        "common-resolution macs_g_ref and falls back to as-deployed macs_g.")
     args = p.parse_args()
 
-    names, X = read_rows(args.csv)
+    names, X, crit_names, macs_col = read_rows(args.csv, args.macs_column)
     hib = np.array(list(CRITERIA.values()))
-    col = {c: i for i, c in enumerate(CRITERIA)}
+    col = {c: i for i, c in enumerate(crit_names)}
     w = max(len(n) for n in names) + 2
 
     print(f"Model selection analysis over {args.csv}")
-    print(f"{len(names)} models x {len(CRITERIA)} criteria: "
-          f"{', '.join(f'{c}{chr(94)}' if h else f'{c}v' for c, h in CRITERIA.items())}\n")
+    print(f"{len(names)} models x {len(crit_names)} criteria: "
+          f"{', '.join(f'{c}{chr(94)}' if h else f'{c}v' for c, h in zip(crit_names, hib))}")
+    print(f"MACs column: {macs_col}"
+          f"{' (all models at one common resolution)' if macs_col == 'macs_g_ref' else ' (as deployed)'}\n")
 
     print("=" * 78)
     print("1) PARETO FRONTIER  (Bianco et al., IEEE Access 2018)")
@@ -199,7 +234,7 @@ def main():
     print(f"3) NETSCORE  (Wong 2018)   O = 20 log10(a^{args.alpha:g} / "
           f"(p^{args.beta:g} m^{args.gamma:g}))")
     print("=" * 78)
-    ns = netscore(X[:, col["a1"]] * 100, X[:, col["params_m"]], X[:, col["macs_g"]],
+    ns = netscore(X[:, col["a1"]] * 100, X[:, col["params_m"]], X[:, col[macs_col]],
                   args.alpha, args.beta, args.gamma)
     for i in np.argsort(-ns):
         print(f"  {names[i]:<{w}}{ns[i]:8.2f} dB")

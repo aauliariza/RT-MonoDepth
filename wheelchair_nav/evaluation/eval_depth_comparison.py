@@ -129,9 +129,27 @@ def build_estimators(args):
     return estimators
 
 
-def count_macs_g(estimator):
-    """Multiply-accumulate operations per forward pass, in billions, at the
-    estimator's own feed resolution.
+def feed_resolution(estimator):
+    """(height, width) the estimator actually runs its network at.
+
+    This differs per model family and is NOT interchangeable: the depth
+    models here are fed 192x640 (their training resolution) while the
+    Ultralytics depth models are fed imgsz x imgsz (640x640 by default),
+    which is 3.3x more pixels. Both MACs and FPS scale with pixel count,
+    so the resolution has to travel with those numbers -- otherwise a
+    cross-model MACs column silently compares different workloads.
+    """
+    h = getattr(estimator, "feed_height", None) or getattr(estimator, "imgsz", 640)
+    w = getattr(estimator, "feed_width", None) or getattr(estimator, "imgsz", 640)
+    return int(h), int(w)
+
+
+def count_macs_g(estimator, hw=None):
+    """Multiply-accumulate operations per forward pass, in billions.
+
+    Measured at `hw` = (height, width) if given, else at the estimator's
+    own feed resolution. Pass an explicit `hw` to get architecture-
+    comparable numbers across models whose deployed resolutions differ.
 
     Reported alongside parameter count because the two measure different
     costs and can disagree sharply: parameters are memory, MACs are
@@ -178,8 +196,7 @@ def count_macs_g(estimator):
         # Ghost-Depth's iAFF would crash outright on batch size 1).
         wrapped.eval()
 
-        h = getattr(estimator, "feed_height", None) or getattr(estimator, "imgsz", 640)
-        w = getattr(estimator, "feed_width", None) or getattr(estimator, "imgsz", 640)
+        h, w = hw if hw is not None else feed_resolution(estimator)
         device = next(wrapped.parameters()).device
         x = torch.randn(1, 3, int(h), int(w), device=device)
         with torch.no_grad():
@@ -214,7 +231,11 @@ def evaluate_model(name: str, estimator, pairs, args):
 
     mean_errors = np.array(errors).mean(0)
     n_params = estimator.num_parameters()
+    feed_h, feed_w = feed_resolution(estimator)
     macs_g = count_macs_g(estimator)
+    # Same architecture, one common resolution -> MACs that can be compared
+    # across models whose deployed resolutions differ.
+    macs_ref = count_macs_g(estimator, hw=args.macs_ref_hw) if args.macs_ref_hw else None
 
     # FPS: warmup + averaged repeated inference on the first test frame,
     # same protocol as eval_depth_metrics.py / compare_runtime.py.
@@ -239,15 +260,18 @@ def evaluate_model(name: str, estimator, pairs, args):
         "a3": mean_errors[6],
         "params_m": n_params / 1e6,
         "macs_g": macs_g,
+        "macs_g_ref": macs_ref,
+        "feed_hw": f"{feed_h}x{feed_w}",
         "fps": fps,
     }
 
 
 def print_table(rows):
-    cols = ["model", "n_images", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3",
-            "params_m", "macs_g", "fps"]
+    has_ref = any(r.get("macs_g_ref") is not None for r in rows)
     headers = ["Model", "N", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3",
-               "Params(M)", "GMACs", "FPS"]
+               "Params(M)", "GMACs", "FeedHxW", "FPS"]
+    if has_ref:
+        headers.insert(11, "GMACs@ref")
     widths = [max(len(h), 12) for h in headers]
     widths[0] = max(widths[0], max(len(r["model"]) for r in rows) + 2)
 
@@ -263,8 +287,10 @@ def print_table(rows):
             f"{r['a1']:.4f}", f"{r['a2']:.4f}", f"{r['a3']:.4f}",
             f"{r['params_m']:.3f}",
             "n/a" if r["macs_g"] is None else f"{r['macs_g']:.3f}",
-            f"{r['fps']:.1f}",
         ]
+        if has_ref:
+            values.append("n/a" if r.get("macs_g_ref") is None else f"{r['macs_g_ref']:.3f}")
+        values += [r["feed_hw"], f"{r['fps']:.1f}"]
         print(fmt_row(values))
 
 
@@ -282,8 +308,24 @@ def parse_args():
     p.add_argument("--yolo_imgsz", type=int, default=640)
     p.add_argument("--fps_cycles", type=int, default=100)
     p.add_argument("--fps_warmup", type=int, default=10)
+    p.add_argument("--macs_ref_hw", default="192x640",
+                    help="HxW at which to additionally measure every model's MACs, so the "
+                         "numbers are comparable across models whose deployed resolutions "
+                         "differ (the depth models run at 192x640, the Ultralytics ones at "
+                         "imgsz x imgsz). Set to 'none' to report only as-deployed MACs.")
     p.add_argument("--out_csv", default=None)
-    return p.parse_args()
+    args = p.parse_args()
+
+    if args.macs_ref_hw and args.macs_ref_hw.lower() != "none":
+        try:
+            h, w = (int(v) for v in args.macs_ref_hw.lower().split("x"))
+        except ValueError:
+            raise SystemExit(f"--macs_ref_hw must look like 192x640, got {args.macs_ref_hw!r}")
+        args.macs_ref_hw = (h, w)
+    else:
+        args.macs_ref_hw = None
+
+    return args
 
 
 def main():
