@@ -28,6 +28,8 @@ import json
 
 from ultralytics import YOLO
 
+from wheelchair_nav.config import YOLO_DEPTH_IMGSZ  # noqa: E402
+
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -37,7 +39,10 @@ def parse_args():
                     help="Empty (default) trains from random init (yolo26{variant}-depth.yaml) -- "
                          "no pretrained checkpoint is used unless a path is passed explicitly")
     p.add_argument("--epochs", type=int, default=60)
-    p.add_argument("--imgsz", type=int, default=640)
+    p.add_argument("--imgsz", type=int, default=YOLO_DEPTH_IMGSZ,
+                    help="Ultralytics letterboxes into imgsz x imgsz; 384 puts a "
+                         "640x480 frame on exactly 288x384 of real content, matching "
+                         "the resolution the other depth models are trained at")
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--device", default="0")
     p.add_argument("--project", default="./wheelchair_nav/log_yolo_depth")

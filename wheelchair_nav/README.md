@@ -33,7 +33,7 @@ dipilih (jalur aman yang dilewati), **kuning/amber** = bebas tapi tidak dipilih
 
 ```
 wheelchair_nav/
-  config.py                        thresholds, sektor, ukuran input
+  config.py                        thresholds, sektor, resolusi input (288x384) semua model depth
   datasets/sunrgbd_dataset.py       PyTorch Dataset RGB + metric-depth SUN RGB-D
   training_log.py                  CSV + kurva train/val loss (dipakai trainer depth)
   scripts/
@@ -151,6 +151,43 @@ dan ke package `wheelchair_nav` sama-sama beres.
 
 ---
 
+## 1b. Resolusi input: 288x384 untuk SEMUA model depth
+
+Kelima model depth dilatih dan dievaluasi pada **konten gambar 288x384** yang sama,
+diatur satu tempat di `wheelchair_nav/config.py` (`INPUT_HEIGHT`, `INPUT_WIDTH`,
+`YOLO_DEPTH_IMGSZ`). Ini prasyarat supaya perbandingan di langkah 8e benar-benar
+mengukur arsitektur, bukan seberapa banyak gambar yang dilihat tiap model.
+
+**Kenapa 288x384, bukan 192x640 (default asli repo):** SUN RGB-D itu 640x480 (4:3).
+
+| Resolusi | Aspect | Skala V / H | Distorsi | /32 | Piksel |
+|---|---|---|---|---|---|
+| 192x640 (default lama) | 3.333 | 0.40 / 1.00 | **2.50x gepeng** | ya | 122,880 |
+| **288x384 (dipakai)** | **1.333** | **0.60 / 0.60** | **tidak ada** | ya | 110,592 |
+
+192x640 itu warisan konfigurasi KITTI (~10:3, wajar di sana). Dipakai untuk gambar
+indoor 4:3 ia **menggepengkan gambar 2.5x secara vertikal** -- menghandicap semua
+model depth. 288x384 memberi skala **seragam 0.6x di kedua sumbu** (tanpa distorsi),
+tetap habis dibagi 32 (syarat encoder 5-stage), dan justru **~10% lebih murah** dari
+192x640. Paper Ghost-Depth sendiri independen memakai 228x304, juga tepat 4:3.
+
+**Untuk YOLO26{n,s}-depth**: Ultralytics menerima satu `imgsz` persegi dan
+*letterbox* ke dalamnya dengan mempertahankan aspect ratio. Pada `--imgsz 384`,
+frame 640x480 mendarat di **tepat 288x384** konten asli (skala 0.6, diverifikasi
+terhadap `ultralytics.data.augment.LetterBox`), sisanya padding abu-abu. Jadi
+konten gambar yang dilihat YOLO **identik** dengan model lain; padding itu hanya
+menambah biaya komputasi (kanvas 384x384 = 1.33x konten efektifnya), bukan
+informasi gambar tambahan.
+
+Catatan: `--imgsz` untuk **detektor obstacle** (`*_yolo_obstacle`) tetap 640 dan
+sengaja tidak diikutkan -- itu model deteksi, bukan salah satu dari 5 model depth,
+dan deteksi objek kecil memang diuntungkan resolusi lebih tinggi.
+
+Semua flag `--height/--width/--imgsz` masih bisa ditimpa per perintah; nilai di
+`config.py` hanya default bersamanya.
+
+---
+
 ## 2. Hyperparameter tuning RT-MonoDepth (Optuna, TPE sampler)
 
 Dijalankan **sebelum** training penuh di langkah 3. `scripts/tune_depth_sunrgbd.py`
@@ -168,7 +205,7 @@ Hyperparameter yang dicari: `learning_rate`, `batch_size`, `smoothness_weight`,
 ```bash
 python -m wheelchair_nav.scripts.tune_depth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --n_trials 30 --epochs_per_trial 5 \
     --out_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json \
     --device cuda
@@ -221,7 +258,7 @@ python -m wheelchair_nav.scripts.train_depth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --log_dir ./wheelchair_nav/log_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
     --num_epochs 40 \
     --hparams_json ./wheelchair_nav/log_sunrgbd/optuna_best_depth_hparams.json
@@ -234,7 +271,7 @@ python -m wheelchair_nav.scripts.train_depth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --log_dir ./wheelchair_nav/log_sunrgbd \
     --model_name RTMonoDepth_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
     --batch_size 16 --num_epochs 40 --learning_rate 1e-4
 ```
@@ -483,7 +520,7 @@ dipakai RT-MonoDepth/FastDepth via `splits_sunrgbd/*.txt`.
 #    dengan cara yang sama:
 python -m wheelchair_nav.scripts.tune_fastdepth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --n_trials 30 --epochs_per_trial 5 \
     --out_json ./wheelchair_nav/log_fastdepth/optuna_best_fastdepth_hparams.json \
     --device cuda
@@ -493,7 +530,7 @@ python -m wheelchair_nav.scripts.train_fastdepth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --log_dir ./wheelchair_nav/log_fastdepth \
     --model_name FastDepth_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
     --num_epochs 40 \
     --hparams_json ./wheelchair_nav/log_fastdepth/optuna_best_fastdepth_hparams.json
@@ -537,7 +574,7 @@ output       1 x H/2   x W/2
 #    dengan tune_depth_sunrgbd.py / tune_fastdepth_sunrgbd.py
 python -m wheelchair_nav.scripts.tune_ghostdepth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --n_trials 30 --epochs_per_trial 5 \
     --out_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json \
     --device cuda
@@ -549,7 +586,7 @@ python -m wheelchair_nav.scripts.train_ghostdepth_sunrgbd \
     --splits_dir ./wheelchair_nav/splits_sunrgbd \
     --log_dir ./wheelchair_nav/log_ghostdepth \
     --model_name GhostDepth_sunrgbd \
-    --height 192 --width 640 \
+    --height 288 --width 384 \
     --min_depth 0.1 --max_depth 10.0 \
     --num_epochs 55 \
     --hparams_json ./wheelchair_nav/log_ghostdepth/optuna_best_ghostdepth_hparams.json
@@ -583,14 +620,14 @@ beberapa detail yang harus disimpulkan. Semuanya didokumentasikan di docstring
 python -m wheelchair_nav.scripts.tune_yolo_depth \
     --variant n \
     --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
-    --n_trials 30 --epochs_per_trial 10 --imgsz 640 --batch 16 --device 0 \
+    --n_trials 30 --epochs_per_trial 10 --imgsz 384 --batch 16 --device 0 \
     --out_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 
 # 2) Training penuh, pakai hasil tuning
 python -m wheelchair_nav.scripts.train_yolo_depth \
     --variant n \
     --data ./wheelchair_nav/data/sunrgbd_yolo_depth/depth_comparison.yaml \
-    --epochs 60 --imgsz 640 --batch 16 --device 0 \
+    --epochs 60 --imgsz 384 --batch 16 --device 0 \
     --hparams_json ./wheelchair_nav/log_yolo_depth/optuna_best_yolo26n_depth_hparams.json
 ```
 
@@ -625,16 +662,18 @@ a2, a3, Params(M), GMACs, GMACs@ref, FeedHxW, FPS` untuk tiap model yang diberik
 dihitung di atas **gambar test yang sama** dan **rumus metrik yang sama** -- juga
 disimpan ke `--out_csv` bila diisi.
 
-**Soal dua kolom GMACs.** Tiap keluarga model jalan di resolusi berbeda: model depth
-di sini di-*feed* 192x640 (resolusi training-nya), sedangkan model depth Ultralytics
-di-*feed* `imgsz x imgsz` (default 640x640) -- **3.3x lebih banyak piksel**. Karena
-MACs *dan* FPS sama-sama berskala dengan jumlah piksel, satu kolom MACs saja akan
-diam-diam membandingkan beban kerja yang berbeda. Karena itu tabelnya melaporkan:
+**Soal dua kolom GMACs.** Kelima model melihat **konten gambar di resolusi yang
+sama** (288x384, lihat kotak di bawah), tapi bentuk *tensor*-nya berbeda: model
+Ultralytics *letterbox* ke kanvas persegi `imgsz x imgsz` = 384x384, jadi tensornya
+lebih besar dari konten yang dibawanya (sisanya padding abu-abu). Karena MACs *dan*
+FPS berskala dengan ukuran **tensor**, tabelnya melaporkan:
 
-- `GMACs` -- di resolusi *as-deployed* tiap model (biaya nyata saat dijalankan)
+- `GMACs` -- di bentuk tensor *as-deployed* tiap model (biaya nyata saat dijalankan;
+  overhead padding YOLO ikut terhitung di sini, sebagaimana mestinya)
 - `GMACs@ref` -- semua model di **satu** resolusi yang sama (`--macs_ref_hw`,
-  default `192x640`), jadi bisa dipakai membandingkan **arsitektur**
-- `FeedHxW` -- resolusi yang benar-benar dipakai, supaya tabelnya self-documenting
+  default = `INPUT_HEIGHT x INPUT_WIDTH`), untuk membandingkan **arsitektur**
+- `FeedHxW` -- bentuk tensor yang benar-benar dipakai, supaya tabelnya
+  mendokumentasikan bebannya sendiri
 
 Pakai `--macs_ref_hw none` kalau hanya ingin kolom *as-deployed*.
 

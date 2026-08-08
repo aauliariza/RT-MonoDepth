@@ -40,6 +40,7 @@ if _REPO_ROOT not in sys.path:
 from layers import get_smooth_loss  # noqa: E402  (repo root, unmodified)
 from networks.GhostDepth.ghost_depth import GhostDepth  # noqa: E402
 
+from wheelchair_nav.config import INPUT_HEIGHT, INPUT_WIDTH  # noqa: E402
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.scripts.train_depth_sunrgbd import masked_l1, scale_invariant_log_loss  # noqa: E402
 from wheelchair_nav.scripts.train_ghostdepth_sunrgbd import berhu_loss  # noqa: E402
@@ -149,8 +150,8 @@ def objective_factory(args, device: torch.device):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--splits_dir", default="./wheelchair_nav/splits_sunrgbd")
-    p.add_argument("--height", type=int, default=192)
-    p.add_argument("--width", type=int, default=640)
+    p.add_argument("--height", type=int, default=INPUT_HEIGHT)
+    p.add_argument("--width", type=int, default=INPUT_WIDTH)
     p.add_argument("--min_depth", type=float, default=0.1)
     p.add_argument("--max_depth", type=float, default=10.0)
     p.add_argument("--loss", choices=["berhu", "l1_silog"], default="berhu",

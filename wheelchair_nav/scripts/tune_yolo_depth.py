@@ -35,6 +35,8 @@ import os
 import optuna
 from ultralytics import YOLO
 
+from wheelchair_nav.config import YOLO_DEPTH_IMGSZ  # noqa: E402
+
 
 def objective_factory(args):
     def objective(trial: optuna.Trial) -> float:
@@ -90,7 +92,10 @@ def parse_args():
     p.add_argument("--epochs_per_trial", type=int, default=10,
                     help="Short proxy fine-tuning budget per trial -- the full budget is used "
                          "later in train_yolo_depth.py")
-    p.add_argument("--imgsz", type=int, default=640)
+    p.add_argument("--imgsz", type=int, default=YOLO_DEPTH_IMGSZ,
+                    help="Ultralytics letterboxes into imgsz x imgsz; 384 puts a "
+                         "640x480 frame on exactly 288x384 of real content, matching "
+                         "the resolution the other depth models are trained at")
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--device", default="0")
     p.add_argument("--n_trials", type=int, default=30)

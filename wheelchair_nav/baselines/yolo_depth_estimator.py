@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from wheelchair_nav.config import YOLO_DEPTH_IMGSZ
+
 
 class YoloDepthEstimator:
-    def __init__(self, weights: str, device: str = "cuda", imgsz: int = 640):
+    def __init__(self, weights: str, device: str = "cuda", imgsz: int = YOLO_DEPTH_IMGSZ):
         from ultralytics import YOLO  # lazy import, mirrors perception/obstacle_detector.py
 
         self.model = YOLO(weights)

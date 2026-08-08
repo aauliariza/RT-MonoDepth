@@ -16,9 +16,34 @@ EMERGENCY_DISTANCE_M = 0.5   # bypasses the hysteresis window and stops immediat
 MIN_DEPTH_M = 0.1
 MAX_DEPTH_M = 10.0
 
-# RT-MonoDepth input resolution (matches options.py defaults for the repo)
-INPUT_HEIGHT = 192
-INPUT_WIDTH = 640
+# ---------------------------------------------------------------------------
+# Input resolution shared by EVERY depth model in this project, so the
+# apples-to-apples comparison in evaluation/eval_depth_comparison.py comes
+# down to architecture rather than how much of the image each model saw.
+#
+# Why 288x384 rather than the repo's original 192x640: SUN RGB-D is 640x480
+# (4:3), and 288x384 is the resolution that
+#   - preserves that 4:3 aspect exactly -- a uniform 0.6x scale in BOTH axes,
+#     so nothing is distorted. The repo's 192x640 default is inherited from
+#     KITTI (~10:3), and applied to 4:3 indoor frames it SQUASHES them 2.5x
+#     vertically, which handicapped every depth model here;
+#   - stays divisible by 32, as the 5-stage encoders require;
+#   - costs ~10% FEWER MACs than 192x640 (110,592 px vs 122,880), so fixing
+#     the distortion is free.
+#
+# The Ghost-Depth paper independently uses 228x304, also exactly 4:3.
+# ---------------------------------------------------------------------------
+INPUT_HEIGHT = 288
+INPUT_WIDTH = 384
+
+# Ultralytics takes one square imgsz and letterboxes into it, preserving
+# aspect ratio. At imgsz=384 a 640x480 frame lands on exactly 288x384 of
+# real content (scale 0.6, verified against ultralytics.data.augment.LetterBox)
+# with the remainder grey padding -- i.e. the SAME effective resolution the
+# other depth models get from INPUT_HEIGHT x INPUT_WIDTH. The padding makes
+# YOLO's canvas 384x384, so it pays ~1.33x the MACs of its own useful content;
+# that is padding overhead, not extra image information.
+YOLO_DEPTH_IMGSZ = 384
 
 # ---------------------------------------------------------------------------
 # Obstacle List (perception fusion): depth_m = median(depth_map[bbox_inner_ROI])

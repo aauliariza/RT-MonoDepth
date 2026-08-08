@@ -67,7 +67,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from wheelchair_nav.config import MAX_DEPTH_M, MIN_DEPTH_M, SAFE_DISTANCE_M, SECTOR_NAMES  # noqa: E402
+from wheelchair_nav.config import (  # noqa: E402
+    MAX_DEPTH_M, MIN_DEPTH_M, SAFE_DISTANCE_M, SECTOR_NAMES, YOLO_DEPTH_IMGSZ,
+)
 from wheelchair_nav.navigation.controller import WheelchairController  # noqa: E402
 from wheelchair_nav.navigation.free_path import DECISION_TO_SECTOR, FreePathSelector  # noqa: E402
 from wheelchair_nav.navigation.sectors import compute_sector_depths  # noqa: E402
@@ -287,7 +289,7 @@ def parse_args():
                     help="Only used by --depth_model rtmonodepth/fastdepth/ghostdepth")
     p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M,
                     help="Only used by --depth_model rtmonodepth/fastdepth/ghostdepth")
-    p.add_argument("--yolo_depth_imgsz", type=int, default=640,
+    p.add_argument("--yolo_depth_imgsz", type=int, default=YOLO_DEPTH_IMGSZ,
                     help="Only used by --depth_model yolo26n-depth/yolo26s-depth")
     p.add_argument("--max_depth_vis", type=float, default=6.0)
     p.add_argument("--show", action="store_true")

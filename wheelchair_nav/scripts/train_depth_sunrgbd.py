@@ -55,6 +55,7 @@ if _REPO_ROOT not in sys.path:
 from layers import disp_to_depth, get_smooth_loss  # noqa: E402  (repo root, unmodified)
 from networks.RTMonoDepth.RTMonoDepth import DepthDecoder, DepthEncoder  # noqa: E402  (repo root, unmodified)
 
+from wheelchair_nav.config import INPUT_HEIGHT, INPUT_WIDTH  # noqa: E402
 from wheelchair_nav.datasets.sunrgbd_dataset import SUNRGBDDepthDataset  # noqa: E402
 from wheelchair_nav.training_log import save_training_curve  # noqa: E402
 
@@ -129,8 +130,8 @@ def parse_args():
     p.add_argument("--splits_dir", default="./wheelchair_nav/splits_sunrgbd")
     p.add_argument("--log_dir", default="./wheelchair_nav/log_sunrgbd")
     p.add_argument("--model_name", default="RTMonoDepth_sunrgbd")
-    p.add_argument("--height", type=int, default=192)
-    p.add_argument("--width", type=int, default=640)
+    p.add_argument("--height", type=int, default=INPUT_HEIGHT)
+    p.add_argument("--width", type=int, default=INPUT_WIDTH)
     p.add_argument("--min_depth", type=float, default=0.1)
     p.add_argument("--max_depth", type=float, default=10.0)
     p.add_argument("--batch_size", type=int, default=16)

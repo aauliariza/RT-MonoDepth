@@ -45,7 +45,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from wheelchair_nav.config import MAX_DEPTH_M, MIN_DEPTH_M  # noqa: E402
+from wheelchair_nav.config import (  # noqa: E402
+    INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M, YOLO_DEPTH_IMGSZ,
+)
 
 
 def compute_errors(gt: np.ndarray, pred: np.ndarray):
@@ -132,15 +134,18 @@ def build_estimators(args):
 def feed_resolution(estimator):
     """(height, width) the estimator actually runs its network at.
 
-    This differs per model family and is NOT interchangeable: the depth
-    models here are fed 192x640 (their training resolution) while the
-    Ultralytics depth models are fed imgsz x imgsz (640x640 by default),
-    which is 3.3x more pixels. Both MACs and FPS scale with pixel count,
-    so the resolution has to travel with those numbers -- otherwise a
-    cross-model MACs column silently compares different workloads.
+    All depth models in this project are trained and run on the same
+    IMAGE CONTENT resolution (config.INPUT_HEIGHT x INPUT_WIDTH), but the
+    Ultralytics models reach it differently: they letterbox into a square
+    imgsz x imgsz canvas, so their tensor is larger than the content it
+    carries (at imgsz=384 a 640x480 frame occupies exactly 288x384 with the
+    rest grey padding). What this function reports is the TENSOR shape,
+    which is what MACs and FPS actually scale with -- hence the padding
+    overhead shows up as cost, correctly, and the resolution travels with
+    those numbers instead of being silently assumed equal.
     """
-    h = getattr(estimator, "feed_height", None) or getattr(estimator, "imgsz", 640)
-    w = getattr(estimator, "feed_width", None) or getattr(estimator, "imgsz", 640)
+    h = getattr(estimator, "feed_height", None) or getattr(estimator, "imgsz", YOLO_DEPTH_IMGSZ)
+    w = getattr(estimator, "feed_width", None) or getattr(estimator, "imgsz", YOLO_DEPTH_IMGSZ)
     return int(h), int(w)
 
 
@@ -305,14 +310,15 @@ def parse_args():
     p.add_argument("--min_depth", type=float, default=MIN_DEPTH_M)
     p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--yolo_imgsz", type=int, default=640)
+    p.add_argument("--yolo_imgsz", type=int, default=YOLO_DEPTH_IMGSZ)
     p.add_argument("--fps_cycles", type=int, default=100)
     p.add_argument("--fps_warmup", type=int, default=10)
-    p.add_argument("--macs_ref_hw", default="192x640",
+    p.add_argument("--macs_ref_hw", default=f"{INPUT_HEIGHT}x{INPUT_WIDTH}",
                     help="HxW at which to additionally measure every model's MACs, so the "
-                         "numbers are comparable across models whose deployed resolutions "
-                         "differ (the depth models run at 192x640, the Ultralytics ones at "
-                         "imgsz x imgsz). Set to 'none' to report only as-deployed MACs.")
+                         "numbers are comparable across models whose TENSOR shapes differ "
+                         "(the Ultralytics models letterbox onto a padded square canvas). "
+                         "Defaults to config.INPUT_HEIGHT x INPUT_WIDTH. Set to 'none' to "
+                         "report only as-deployed MACs.")
     p.add_argument("--out_csv", default=None)
     args = p.parse_args()
 
