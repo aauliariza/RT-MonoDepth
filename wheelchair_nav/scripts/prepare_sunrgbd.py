@@ -4,10 +4,11 @@ into:
     (wheelchair_nav/datasets/sunrgbd_dataset.py);
   - single-class ("obstacle") YOLO detection labels converted from SUN
     RGB-D's OWN 2D bounding-box annotations (annotation2Dfinal/index.json,
-    --make_yolo_labels). This is the only dataset used to train
-    YOLO26-nano in this project -- no COCO, no other dataset, and
-    scripts/train_yolo_obstacle.py trains from random weights, never from
-    a pretrained checkpoint;
+    --make_yolo_labels). These are the only labels YOLO26-nano is trained
+    on in this project; scripts/train_yolo_obstacle.py fine-tunes the
+    COCO-pretrained yolo26n.pt checkpoint on them (see that script's
+    docstring for why the detector is pretrained while all five depth
+    models are not);
   - (optional, comparison baselines only) the images/{split}+depth/{split}
     layout Ultralytics' native depth task expects, mirroring the exact
     same train/val/test split used for RT-MonoDepth/FastDepth, so
@@ -226,8 +227,9 @@ def _parse_annotation2d(ann_path: str, img_shape, exclude_classes: set, max_box_
 def process_yolo_labels(args):
     """Converts SUN RGB-D's own 2D bounding-box annotations
     (annotation2Dfinal/index.json) into single-class ("obstacle") YOLO
-    detection labels -- the only dataset scripts/train_yolo_obstacle.py
-    trains on (no COCO, no other dataset, no pretrained weights). Scenes
+    detection labels -- the only labelled dataset
+    scripts/train_yolo_obstacle.py trains on (it fine-tunes COCO-pretrained
+    yolo26n.pt weights on these labels; no other dataset). Scenes
     missing annotation2Dfinal/, or whose JSON doesn't parse (a handful of
     scenes in the official release have malformed JSON), are skipped and
     counted, not silently substituted with another data source.

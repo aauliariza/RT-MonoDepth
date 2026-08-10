@@ -124,8 +124,9 @@ dan ke package `wheelchair_nav` sama-sama beres.
 
 3. **Wajib** untuk training YOLO26-nano di langkah 5: konversi anotasi 2D bawaan
    SUN RGB-D sendiri (`annotation2Dfinal/index.json`) jadi label YOLO **satu kelas**
-   (`obstacle`), class-agnostic. **Ini satu-satunya dataset yang dipakai untuk
-   training deteksi obstacle** -- tidak ada dataset lain (COCO dsb.) yang dipakai:
+   (`obstacle`), class-agnostic. **Ini satu-satunya dataset berlabel yang dipakai
+   untuk training deteksi obstacle**; bobot awalnya di-fine-tune dari checkpoint
+   COCO-pretrained (lihat langkah 5 untuk alasan metodologisnya):
 
    ```bash
    python -m wheelchair_nav.scripts.prepare_sunrgbd \
@@ -320,11 +321,14 @@ training masih berjalan.
 
 Dijalankan **sebelum** training penuh di langkah 5. Sama pola dengan langkah 2:
 `scripts/tune_yolo_obstacle.py` memakai `optuna.Study` + `TPESampler`, tiap trial
-melatih **dari bobot acak** (`yolo26n.yaml`, bukan checkpoint pretrained apa pun)
-untuk beberapa epoch singkat (`--epochs_per_trial`) di atas `--data` (label SUN
-RGB-D dari langkah 1.3 -- satu-satunya dataset), lalu diberi skor dari validation
-mAP50-95 (dimaksimalkan) -- dibaca dengan cara yang sama seperti
-`evaluation/eval_detection_metrics.py`.
+me-*fine-tune* salinan baru dari `--pretrained` (default `yolo26n.pt`) untuk
+beberapa epoch singkat (`--epochs_per_trial`) di atas `--data` (label SUN RGB-D
+dari langkah 1.3), lalu diberi skor dari validation mAP50-95 (dimaksimalkan) --
+dibaca dengan cara yang sama seperti `evaluation/eval_detection_metrics.py`.
+
+> `--pretrained` di sini **harus sama** dengan yang dipakai di langkah 5. Kalau
+> berbeda, hyperparameter hasil tuning (terutama `lr0` dan `warmup_epochs`)
+> optimal untuk titik awal yang berbeda dari yang benar-benar dipakai training.
 
 Hyperparameter yang dicari: optimizer (`lr0`, `lrf`, `momentum`, `weight_decay`,
 `warmup_epochs`), bobot loss (`box`, `cls`), dan augmentasi (`hsv_h`, `hsv_s`, `hsv_v`,
@@ -344,21 +348,42 @@ flag `--hparams_json` di langkah 5.
 
 ---
 
-## 5. Training YOLO26-nano dari scratch (deteksi bbox, class-agnostic)
+## 5. Training YOLO26-nano (deteksi bbox, class-agnostic, fine-tune dari COCO)
 
 YOLO26-nano dipakai **hanya** untuk bbox per obstacle; identitas kelas (nama objek)
 selalu dibuang di `perception/obstacle_detector.py`, jadi tidak perlu recognition
-nama objek. Training **selalu dari bobot acak** (`yolo26n.yaml`) di atas label SUN
-RGB-D dari langkah 1.3 -- **tidak ada dataset lain dan tidak ada checkpoint
-pretrained (COCO atau lainnya) yang dipakai**, konsisten dengan kebijakan "from
-scratch" yang sama dipakai RT-MonoDepth.
+nama objek. Training adalah **fine-tuning dari checkpoint COCO-pretrained**
+(`yolo26n.pt`, default `--pretrained`) di atas label SUN RGB-D dari langkah 1.3.
+
+### Kenapa detektor memakai pretrained sementara kelima model depth tidak
+
+Ini asimetri yang **disengaja**, dan alasannya bukan kenyamanan:
+
+- **Model depth adalah objek pembandingan.** Pertanyaan penelitiannya adalah model
+  depth mana yang paling seimbang, jadi kelimanya wajib mendapat perlakuan identik.
+  Checkpoint pretrained **tidak tersedia setara** untuk kelimanya (Ghost-Depth tidak
+  punya sama sekali, RT-MonoDepth tidak punya versi indoor), sehingga inisialisasi
+  acak adalah satu-satunya setup yang membuat perbandingannya sah.
+- **Detektor bukan objek pembandingan** -- dia komponen tetap pada tahap persepsi,
+  tidak dibandingkan dengan apa pun, jadi kendala keadilan itu tidak berlaku.
+- **Detektor lemah justru merusak perbandingan depth.** Depth hanya dibaca **di
+  dalam bbox** (`obstacle_list.py` mengambil median pada 60% pusat bbox), jadi objek
+  yang tidak terdeteksi tidak terlihat oleh model depth mana pun. Recall detektor
+  yang rendah akan meratakan perbedaan antar model depth yang justru ingin diukur
+  `eval_navigation_metrics.py` di langkah 7.
+- Kelas COCO tumpang tindih kuat dengan isi SUN RGB-D (`chair`, `couch`, `dining
+  table`, `tv`, `bed`, `toilet`, `sink`, `refrigerator`, `person`, `potted plant`),
+  jadi transfer-nya sangat efektif untuk domain indoor ini.
+
+Nyatakan asimetri ini secara eksplisit saat melaporkan hasil: **model depth dilatih
+hanya di SUN RGB-D, detektor di-fine-tune dari COCO.**
 
 Pakai hyperparameter hasil tuning langkah 4 lewat `--hparams_json`:
 
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
     --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
-    --epochs 200 --imgsz 640 --batch 32 --device 0 \
+    --epochs 100 --imgsz 640 --batch 32 --device 0 \
     --hparams_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 ```
 
@@ -367,7 +392,18 @@ atau tanpa hasil tuning, set manual seperti biasa:
 ```bash
 python -m wheelchair_nav.scripts.train_yolo_obstacle \
     --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
-    --epochs 200 --imgsz 640 --batch 32 --device 0
+    --epochs 100 --imgsz 640 --batch 32 --device 0
+```
+
+Untuk ablation *from-scratch vs transfer learning*, jalankan sekali lagi dengan
+`--pretrained ""` (naikkan `--epochs` ke 300-500, karena bobot acak konvergen jauh
+lebih lambat) dan laporkan keduanya:
+
+```bash
+python -m wheelchair_nav.scripts.train_yolo_obstacle \
+    --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml \
+    --pretrained "" --epochs 400 --imgsz 640 --batch 32 --device 0 \
+    --name obstacle_yolo26n_scratch
 ```
 
 Bobot hasil training ada di `./wheelchair_nav/log_yolo/obstacle_yolo26n/weights/best.pt`, siap
@@ -437,7 +473,9 @@ Output:
   end-to-end di langkah 7.
 
 `--yolo_weights` wajib diisi dengan checkpoint hasil langkah 5 (`.../weights/best.pt`)
--- tidak ada fallback ke bobot COCO-pretrained di mana pun dalam sistem ini.
+-- tidak ada nilai default apa pun, supaya sistem navigasi tidak bisa tanpa sengaja
+berjalan memakai `yolo26n.pt` COCO mentah yang belum pernah dilatih pada label
+SUN RGB-D Anda.
 
 ---
 
@@ -746,9 +784,10 @@ Semua threshold ada di `wheelchair_nav/config.py`:
   logging/visualisasi; ganti isinya dengan driver motor sungguhan bila diintegrasikan
   ke perangkat keras.
 - Parsing anotasi 2D SUN RGB-D (`annotation2Dfinal/index.json`, langkah 1.3) adalah
-  **satu-satunya** sumber dataset untuk training YOLO26-nano -- tidak ada dataset
-  lain atau checkpoint pretrained (COCO atau lainnya) yang dipakai di mana pun
-  dalam sistem ini (training maupun `run_navigation.py`). Scene yang tidak punya
+  **satu-satunya** sumber dataset berlabel untuk training YOLO26-nano; yang berasal
+  dari luar hanyalah bobot awal COCO-pretrained (`yolo26n.pt`), lihat langkah 5
+  untuk alasan metodologisnya. Kelima model depth **tidak** memakai checkpoint
+  pretrained apa pun. Scene yang tidak punya
   `annotation2Dfinal/` atau JSON-nya tidak valid dilewati dan dihitung, bukan
   diganti sumber lain -- kalau jumlah scene yang berhasil dikonversi terlalu sedikit,
   periksa `--sunrgbd_root` dan `--exclude_classes`, bukan beralih dataset.

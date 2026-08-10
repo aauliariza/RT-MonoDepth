@@ -278,8 +278,9 @@ def parse_args():
                          "ghostdepth.pth). yolo26n-depth/yolo26s-depth: path to a single .pt "
                          "checkpoint from train_yolo_depth.py")
     p.add_argument("--yolo_weights", required=True,
-                    help="Path to a YOLO26-nano checkpoint trained from scratch on SUN RGB-D "
-                         "(scripts/train_yolo_obstacle.py) -- no COCO-pretrained or other checkpoint")
+                    help="Path to a YOLO26-nano checkpoint trained on SUN RGB-D "
+                         "(scripts/train_yolo_obstacle.py). Required on purpose: raw yolo26n.pt "
+                         "COCO weights are never an acceptable substitute here")
     p.add_argument("--output", default="./wheelchair_nav/out/navigation_demo.mp4")
     p.add_argument("--log_csv", default=None)
     p.add_argument("--device", default="cuda")

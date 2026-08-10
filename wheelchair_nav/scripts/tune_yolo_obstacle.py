@@ -2,12 +2,11 @@
 class-agnostic "obstacle" detector -- run this BEFORE the full training in
 scripts/train_yolo_obstacle.py.
 
-Each trial trains a fresh, randomly-initialized yolo26n.yaml (no
-pretrained checkpoint -- same "from scratch" policy as
-train_yolo_obstacle.py) for a small number of epochs (--epochs_per_trial)
-on --data (SUN RGB-D's own 2D-annotated boxes, converted by
-prepare_sunrgbd.py --make_yolo_labels; no other dataset), and is scored on
-validation mAP50-95 (maximized), read the same way
+Each trial fine-tunes a fresh copy of --pretrained (COCO-pretrained
+yolo26n.pt by default, matching train_yolo_obstacle.py) for a small number
+of epochs (--epochs_per_trial) on --data (SUN RGB-D's own 2D-annotated
+boxes, converted by prepare_sunrgbd.py --make_yolo_labels), and is scored
+on validation mAP50-95 (maximized), read the same way
 evaluation/eval_detection_metrics.py reads it. Trials tune the optimizer
 (lr0, lrf, momentum, weight_decay, warmup_epochs), the loss weighting
 (box, cls) and the augmentation pipeline (hsv/translate/scale/fliplr/
@@ -19,7 +18,7 @@ directly onto Ultralytics' model.train() kwargs, so the full run can pick
 them up with a single flag:
 
     python -m wheelchair_nav.scripts.train_yolo_obstacle \
-        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml --epochs 200 \
+        --data ./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml --epochs 100 \
         --hparams_json ./wheelchair_nav/log_yolo/optuna_best_yolo_hparams.json
 
 Usage:
@@ -84,9 +83,11 @@ def objective_factory(args):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", default="./wheelchair_nav/data/sunrgbd_yolo/obstacle.yaml")
-    p.add_argument("--pretrained", default="",
-                    help="Empty (default) starts each trial from random init (yolo26n.yaml) -- no "
-                         "pretrained checkpoint is used")
+    p.add_argument("--pretrained", default="yolo26n.pt",
+                    help="Checkpoint each trial starts from (default: COCO-pretrained yolo26n.pt). "
+                         "MUST match train_yolo_obstacle.py's --pretrained, otherwise the tuned "
+                         "hyperparameters (especially lr0 and warmup_epochs) are optimal for a "
+                         "different starting point than the final run actually uses.")
     p.add_argument("--epochs_per_trial", type=int, default=10,
                     help="Short proxy fine-tuning budget per trial -- the full budget is used "
                          "later in train_yolo_obstacle.py")

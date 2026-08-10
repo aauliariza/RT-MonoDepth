@@ -3,10 +3,11 @@ proposer. RT-MonoDepth needs to know *where* an obstacle is, not what it
 is, so every detected class is collapsed into a single generic "obstacle"
 downstream -- the class id/name returned by YOLO is discarded entirely.
 
-`weights` must point to a checkpoint trained from scratch on SUN RGB-D's
-own 2D annotations (scripts/train_yolo_obstacle.py) -- there is no
-built-in default, since this project never falls back to a COCO-pretrained
-or otherwise pretrained checkpoint for the obstacle detector.
+`weights` must point to a checkpoint trained on SUN RGB-D's own 2D
+annotations (scripts/train_yolo_obstacle.py, which fine-tunes from COCO by
+default). There is deliberately no built-in default: without one, the
+navigation system cannot silently run on raw COCO weights that were never
+trained on this project's single "obstacle" class.
 """
 from __future__ import annotations
 
