@@ -73,6 +73,8 @@ wheelchair_nav/
     eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs Ghost-Depth vs
                                        YOLO26{n,s}-depth, metrik+params+GMACs+
                                        latency identik, test split identik
+    dss_saw_entropy.py                sistem pendukung keputusan: normalisasi SAW
+                                       + bobot Shannon entropy (lihat langkah 8f)
   requirements.txt
 ```
 
@@ -787,6 +789,82 @@ FPS berskala dengan ukuran **tensor**, tabelnya melaporkan:
   mendokumentasikan bebannya sendiri
 
 Pakai `--macs_ref_hw none` kalau hanya ingin kolom *as-deployed*.
+
+### 8f. Sistem pendukung keputusan: SAW + bobot Shannon entropy
+
+```bash
+python -m wheelchair_nav.evaluation.dss_saw_entropy \
+    --csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv \
+    --out_csv ./wheelchair_nav/log_sunrgbd/dss_result.csv
+```
+
+Menentukan model paling efisien dari tabel langkah 8e dengan **bobot objektif** --
+tidak ada bobot yang dipilih tangan.
+
+**Langkah 1 -- normalisasi SAW** (*linear scale transformation*, sadar arah), semua
+kolom jadi "makin tinggi makin baik" pada skala $(0, 1]$:
+
+$$r_{ij} = \frac{x_{ij}}{\max_i x_{ij}} \ \text{(benefit)} \qquad
+  r_{ij} = \frac{\min_i x_{ij}}{x_{ij}} \ \text{(cost)}$$
+
+[Fishburn, *Operations Research* 15(3), 1967; MacCrimmon, RAND RM-4823-ARPA, 1968]
+
+**Langkah 2 -- entropy Shannon** tiap kriteria, dengan $p_{ij} = r_{ij}/\sum_i r_{ij}$
+dan $k = 1/\ln m$ agar $e_j \in [0,1]$:
+
+$$e_j = -k \sum_{i=1}^{m} p_{ij}\ln p_{ij}, \qquad 0\ln 0 := 0$$
+
+$$d_j = 1 - e_j, \qquad w_j = \frac{d_j}{\sum_j d_j}$$
+
+[Shannon, *Bell System Technical Journal* 27, 1948; Zeleny, *Multiple Criteria
+Decision Making*, McGraw-Hill, 1982]
+
+**Langkah 3 -- agregasi SAW:** $V_i = \sum_j w_j\, r_{ij}$, $V_i$ tertinggi menang.
+
+Entropy dihitung pada matriks yang **sudah** dinormalisasi arah ($R$), bukan pada $X$
+mentah. Kalau dihitung pada $X$, bobot sebuah kriteria akan bergantung pada satuan
+yang kebetulan dipakai. Sebutkan pilihan ini saat melaporkan -- ini varian yang
+terdokumentasi, bukan satu-satunya.
+
+#### Dua hal yang harus Anda tangani sendiri
+
+**1. Entropy mengukur SEBARAN, bukan KEPENTINGAN.** Kriteria yang nilainya mirip di
+semua model dapat bobot ~0, sekalipun ia angka paling kritis untuk keselamatan. Pada
+tabel 5 model yang tipikal, `abs_rel` dan `a1` bisa hanya dapat **<0.5%** sementara
+`macs_g_ref` mengambil **>70%** -- benar secara teori informasi, belum tentu benar
+secara rekayasa. Perbaiki dengan prior subjektif:
+
+```bash
+python -m wheelchair_nav.evaluation.dss_saw_entropy \
+    --csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv \
+    --subjective_weights '{"abs_rel":0.30,"a1":0.30,"params_m":0.10,"macs_g_ref":0.10,"lat_p95_ms":0.20}' \
+    --synthesis additive
+```
+
+| `--synthesis` | Rumus | Sifat |
+|---|---|---|
+| `multiplicative` (default) | $w_j^* \propto w_j \cdot s_j$ | entropy tetap dominan; **tidak bisa** mengangkat kriteria yang sudah dinolkan entropy |
+| `additive` | $w_j^* \propto \lambda w_j + (1-\lambda) s_j$ | bisa; `--synthesis_lambda` (default 0.5) mengatur porsinya |
+
+**2. Entropy tidak mengenal redundansi.** `abs_rel`, `sq_rel`, `rmse`, `rmse_log`
+mengukur hal yang sama -- memasukkan keempatnya membuat keluarga *error* membawa
+bobot ~4x, bukan karena lebih penting tapi karena ditulis 4 kali. Dan `fps` **persis**
+$1000/\texttt{lat\_mean\_ms}$. Karena itu default-nya **satu wakil per keluarga**:
+
+| Kriteria | Arah | Mewakili |
+|---|---|---|
+| `abs_rel` | cost | error (sq_rel, rmse, rmse_log) |
+| `a1` | benefit | akurasi (a2, a3) |
+| `params_m` | cost | biaya memori |
+| `macs_g_ref` | cost | biaya komputasi, resolusi seragam |
+| `lat_p95_ms` | cost | ekor latency (**bukan** `fps`) |
+
+Ganti dengan `--criteria` bila perlu (`"abs_rel,a1,recall:benefit"` -- arah kolom yang
+sudah dikenal disimpulkan otomatis). Kombinasi yang redundan tetap dijalankan, tapi
+diberi **WARNING**.
+
+Setiap kali dijalankan, script juga menghitung ulang peringkat dengan **bobot sama
+rata** ($w_j = 1/n$) sebagai uji kekokohan, dan menyatakan apakah pemenangnya berubah.
 
 ---
 
