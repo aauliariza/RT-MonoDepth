@@ -162,7 +162,10 @@ def count_macs_g(estimator, hw=None):
     Reported alongside parameter count because the two measure different
     costs and can disagree sharply: parameters are memory, MACs are
     arithmetic, and a network can be modest in one and expensive in the
-    other. NetScore (Wong, 2018) weighs both.
+    other. Neither predicts latency on its own -- depthwise/Ghost
+    convolutions are memory-bound, so a model can hold the lowest MACs in
+    the table and still be the slowest, which is why latency is measured
+    directly rather than inferred from MACs.
 
     Returns None if thop is missing or the estimator's backing module
     can't be resolved -- the column is then left blank rather than

@@ -73,8 +73,6 @@ wheelchair_nav/
     eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs Ghost-Depth vs
                                        YOLO26{n,s}-depth, metrik+params+GMACs+
                                        latency identik, test split identik
-    model_selection.py                pilih model "paling worth it": Pareto / information
-                                       density / NetScore / TOPSIS (lihat langkah 8f)
   requirements.txt
 ```
 
@@ -789,24 +787,6 @@ FPS berskala dengan ukuran **tensor**, tabelnya melaporkan:
   mendokumentasikan bebannya sendiri
 
 Pakai `--macs_ref_hw none` kalau hanya ingin kolom *as-deployed*.
-
-### 8f. Pilih model paling "worth it" (analisis multi-kriteria)
-
-```bash
-python -m wheelchair_nav.evaluation.model_selection \
-    --csv ./wheelchair_nav/log_sunrgbd/depth_comparison.csv
-```
-
-Menjalankan empat metode bersitasi jurnal di atas tabel langkah 8e, dari asumsi
-paling lemah ke paling kuat: **Pareto frontier** (Bianco et al., IEEE Access 2018),
-**information density** (Canziani et al. 2016), **NetScore** (Wong 2018), dan
-**TOPSIS** (Hwang & Yoon 1981) atas 4 skenario bobot sebagai analisis sensitivitas.
-Rumus + sitasi lengkap ada di docstring `evaluation/model_selection.py`.
-
-Secara default ia memakai kolom `macs_g_ref` (resolusi seragam). Kalau CSV-nya hanya
-punya `macs_g` dengan resolusi campur, script mencetak **WARNING** dan menjelaskan
-bahwa NetScore akan menghukum model beresolusi lebih tinggi -- regenerate CSV-nya
-dengan `--macs_ref_hw 192x640`. Paksa kolom tertentu lewat `--macs_column`.
 
 ---
 
