@@ -20,6 +20,13 @@ banner (decision, nearest-obstacle distance, FPS), concatenated side by
 side with the colorized depth map (right, same resolution) -- plus a
 per-frame CSV log used by evaluation/eval_navigation_metrics.py.
 
+The CSV carries a per-stage latency breakdown -- depth_ms, detect_ms,
+nav_ms and total_ms -- alongside the decision and sector depths. These
+cover the CONTROL LOOP only (perception -> decision); overlay drawing and
+video encoding are deliberately timed out of them, since a real wheelchair
+renders nothing. total_ms is therefore the delay a physical chair would
+actually experience between a frame arriving and a drive command changing.
+
 Usage (RT-MonoDepth, default):
     python -m wheelchair_nav.run_navigation \
         --video path/to/input.mp4 \
@@ -322,7 +329,10 @@ def main():
 
     csv_file = open(log_csv, "w", newline="")
     csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(["frame", "decision", "num_obstacles", "min_depth_m", "fps"] + list(SECTOR_NAMES))
+    csv_writer.writerow(
+        ["frame", "decision", "num_obstacles", "min_depth_m", "fps",
+         "depth_ms", "detect_ms", "nav_ms", "total_ms"] + list(SECTOR_NAMES)
+    )
 
     frame_idx = 0
     fps_ema = 0.0
@@ -332,16 +342,29 @@ def main():
         ok, frame = cap.read()
         if not ok:
             break
-        t0 = time.time()
-
+        # Per-stage wall-clock latency. Timed separately so the CSV can show
+        # WHERE the frame budget goes, not just that it was exceeded: depth
+        # and detection are the two GPU stages that dominate, while the
+        # navigation stage (obstacle list -> sectors -> hysteresis) is pure
+        # CPU arithmetic and should stay well under a millisecond.
+        t0 = time.perf_counter()
         depth_map = depth_estimator.infer(frame)
+        t_depth = time.perf_counter()
         boxes = detector.detect(frame)
+        t_detect = time.perf_counter()
+
         obstacles = build_obstacle_list(depth_map, boxes)
         sector_depths = compute_sector_depths(obstacles, image_width=w)
         decision = selector.update(sector_depths)
         controller.step(decision)
+        t_end = time.perf_counter()
 
-        dt = time.time() - t0
+        depth_ms = (t_depth - t0) * 1000.0
+        detect_ms = (t_detect - t_depth) * 1000.0
+        nav_ms = (t_end - t_detect) * 1000.0
+        total_ms = (t_end - t0) * 1000.0
+
+        dt = t_end - t0
         fps = 1.0 / dt if dt > 0 else 0.0
         fps_ema = fps if frame_idx == 0 else 0.9 * fps_ema + 0.1 * fps
 
@@ -360,6 +383,7 @@ def main():
             frame_idx, decision, len(obstacles),
             f"{min_depth:.3f}" if np.isfinite(min_depth) else "inf",
             f"{fps:.2f}",
+            f"{depth_ms:.3f}", f"{detect_ms:.3f}", f"{nav_ms:.3f}", f"{total_ms:.3f}",
         ] + [
             f"{sector_depths[s]:.3f}" if np.isfinite(sector_depths[s]) else "inf" for s in SECTOR_NAMES
         ])

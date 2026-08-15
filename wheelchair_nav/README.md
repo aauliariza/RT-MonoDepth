@@ -62,13 +62,17 @@ wheelchair_nav/
     controller.py                     decision -> simulated drive command
   run_navigation.py                  entry point: uji sistem pada file video
   evaluation/
+    latency.py                        pengukuran latency bersama: mean/std/min/
+                                       p50/p90/p95/p99/max + reaction distance
     eval_depth_metrics.py             abs_rel/sq_rel/rmse/rmse_log/a1-a3 + params + FPS
-    eval_detection_metrics.py         mAP50/mAP50-95/precision/recall + params + FPS
-    eval_navigation_metrics.py        FPS pipeline, missed/false-stop rate,
+    eval_detection_metrics.py         mAP50/mAP50-95/precision/recall + params
+                                       + distribusi latency
+    eval_navigation_metrics.py        latency end-to-end + breakdown per tahap,
+                                       reaction distance, missed/false-stop rate,
                                        decision accuracy, distance MAE/RMSE
     eval_depth_comparison.py          RT-MonoDepth vs FastDepth vs Ghost-Depth vs
-                                       YOLO26{n,s}-depth, metrik+params+GMACs+FPS
-                                       identik, test split identik
+                                       YOLO26{n,s}-depth, metrik+params+GMACs+
+                                       latency identik, test split identik
     model_selection.py                pilih model "paling worth it": Pareto / information
                                        density / NetScore / TOPSIS (lihat langkah 8f)
   requirements.txt
@@ -503,7 +507,7 @@ python -m wheelchair_nav.evaluation.eval_detection_metrics \
     --device 0
 ```
 
-### 7c. Sistem navigasi end-to-end: FPS pipeline, keamanan, akurasi keputusan, error jarak
+### 7c. Sistem navigasi end-to-end: latency, keamanan, akurasi keputusan, error jarak
 
 ```bash
 python -m wheelchair_nav.evaluation.eval_navigation_metrics \
@@ -515,9 +519,43 @@ python -m wheelchair_nav.evaluation.eval_navigation_metrics \
     --depth_weights ./wheelchair_nav/log_sunrgbd/RTMonoDepth_sunrgbd/models/best
 ```
 
-Selalu dihitung dari log: FPS pipeline (mean/min/max), **missed-stop rate** (obstacle
-< threshold tapi sistem tetap FORWARD -- risiko tabrakan) dan **false-stop rate**
-(sistem STOP padahal tidak ada obstacle < threshold -- terlalu konservatif).
+Selalu dihitung dari log: FPS pipeline (mean/min/max), **distribusi latency
+end-to-end**, **missed-stop rate** (obstacle < threshold tapi sistem tetap FORWARD --
+risiko tabrakan) dan **false-stop rate** (sistem STOP padahal tidak ada obstacle <
+threshold -- terlalu konservatif).
+
+#### Kenapa latency, bukan cuma FPS
+
+FPS adalah **throughput** -- berapa frame per detik yang sanggup diproses. Latency
+adalah **delay per frame** antara foton masuk kamera dan perintah gerak berubah.
+Untuk kursi roda otonom, FPS rata-rata menyembunyikan ekornya: model dengan rata-rata
+8 ms yang sesekali melonjak ke 90 ms punya FPS yang sama dengan model yang stabil di
+9 ms, padahal hanya yang kedua aman.
+
+`eval_navigation_metrics.py` melaporkan tiga hal dari kolom `total_ms` / `depth_ms` /
+`detect_ms` / `nav_ms` yang ditulis `run_navigation.py`:
+
+1. **Distribusi latency end-to-end** -- mean, std, min, p50, p90, p95, p99, max (ms).
+2. **Breakdown per tahap** -- berapa persen anggaran frame dihabiskan depth, deteksi,
+   dan navigasi. Tahap navigasi murni CPU dan seharusnya jauh di bawah 1 ms; kalau
+   tidak, ada yang salah.
+3. **Reaction distance** -- jarak yang masih ditempuh kursi roda sambil "buta" selama
+   frame sedang diproses, pada kecepatan jelajah controller (0.6 m/s):
+
+   $$d_{\text{reaksi}} = v_{\text{cruise}} \times t_{\text{latency}}$$
+
+   Bandingkan angka **p99**-nya dengan `EMERGENCY_DISTANCE_M = 0.5 m`. Kalau reaction
+   distance p99 memakan bagian berarti dari margin 0.5 m itu, itu temuan yang harus
+   dilaporkan, bukan catatan kaki.
+
+Latency diukur dengan `time.perf_counter()` (wall clock), **bukan** CUDA events --
+karena CUDA events hanya menghitung kernel GPU dan diam-diam membuang biaya resize,
+transfer H2D dan D2H yang benar-benar dibayar sistem. Setiap sampel dibatasi
+`torch.cuda.synchronize()`, sebab tanpa itu timer hanya mencatat waktu submit antrian,
+bukan waktu selesai.
+
+> Log CSV lama yang belum punya kolom latency tetap bisa dibaca -- bagian FPS dan
+> safety tetap keluar, bagian latency dilewati dengan pesan.
 
 Opsional dengan ground truth:
 - `--gt_decisions` (CSV `frame,decision`) -> akurasi keputusan + confusion matrix.
@@ -720,10 +758,22 @@ python -m wheelchair_nav.evaluation.eval_depth_comparison \
 ```
 
 Boleh isi hanya sebagian flag `--*_weights*` -- model yang tidak diberi bobotnya
-otomatis dilewati. Mencetak satu tabel berisi `abs_rel, sq_rel, rmse, rmse_log, a1,
-a2, a3, Params(M), GMACs, GMACs@ref, FeedHxW, FPS` untuk tiap model yang diberikan,
-dihitung di atas **gambar test yang sama** dan **rumus metrik yang sama** -- juga
-disimpan ke `--out_csv` bila diisi.
+otomatis dilewati. Dihitung di atas **gambar test yang sama** dan **rumus metrik yang
+sama**, lalu mencetak **dua tabel** (keduanya masuk ke `--out_csv` bila diisi):
+
+1. **Tabel akurasi + biaya** -- `abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3,
+   Params(M), GMACs, GMACs@ref, FeedHxW, FPS, p95(ms)`.
+2. **Tabel latency** -- `mean, std, min, p50, p90, p95, p99, max` (ms) + FPS, diukur
+   pada jalur `.infer()` penuh (resize → H2D → forward → D2H) dengan protokol identik
+   untuk kelima model.
+
+`p95(ms)` sengaja muncul di kedua tabel: **mean hanya bilang seberapa cepat model
+*biasanya*, p95 yang menentukan apakah model itu cukup cepat.** FPS diturunkan dari
+mean latency (`1000 / mean_ms`), jadi keduanya tidak mungkin saling bertentangan.
+
+Atur banyaknya sampel dengan `--latency_cycles` (default 200). p99 diinterpolasi dari
+~1% sampel teratas, jadi **naikkan ke 500+ kalau p99-nya mau dikutip di paper.** Nama
+lama `--fps_cycles` / `--fps_warmup` tetap berfungsi sebagai alias.
 
 **Soal dua kolom GMACs.** Kelima model melihat **konten gambar di resolusi yang
 sama** (288x384, lihat kotak di bawah), tapi bentuk *tensor*-nya berbeda: model

@@ -13,9 +13,12 @@ All models are scored with the exact same metric definitions
 evaluate_depth_full.py in the repo root and
 evaluation/eval_depth_metrics.py), the same valid-pixel mask, and the same
 test images, so the resulting table isolates architecture/training
-differences rather than evaluation-protocol differences. Parameter count
-and inference FPS are reported alongside for a full accuracy-vs-cost
-picture.
+differences rather than evaluation-protocol differences. Parameter count,
+MACs and the full per-inference LATENCY DISTRIBUTION (mean/std/min/p50/
+p90/p95/p99/max, plus FPS derived from the mean) are reported alongside
+for a complete accuracy-vs-cost picture -- see evaluation/latency.py for
+why the tail percentiles, not the mean, are what bound a wheelchair's
+worst-case reaction distance.
 
 Pass only the weights for the models you want in the table; any model
 whose weights flag is omitted is skipped.
@@ -36,7 +39,6 @@ import argparse
 import csv
 import os
 import sys
-import time
 
 import cv2
 import numpy as np
@@ -48,6 +50,7 @@ if _REPO_ROOT not in sys.path:
 from wheelchair_nav.config import (  # noqa: E402
     INPUT_HEIGHT, INPUT_WIDTH, MAX_DEPTH_M, MIN_DEPTH_M, YOLO_DEPTH_IMGSZ,
 )
+from wheelchair_nav.evaluation.latency import format_latency_table, measure_latency  # noqa: E402
 
 
 def compute_errors(gt: np.ndarray, pred: np.ndarray):
@@ -242,16 +245,18 @@ def evaluate_model(name: str, estimator, pairs, args):
     # across models whose deployed resolutions differ.
     macs_ref = count_macs_g(estimator, hw=args.macs_ref_hw) if args.macs_ref_hw else None
 
-    # FPS: warmup + averaged repeated inference on the first test frame,
-    # same protocol as eval_depth_metrics.py / compare_runtime.py.
+    # Latency + FPS: warmup, then per-call timing of the full .infer() path
+    # (resize -> H2D -> forward -> D2H) on the first test frame, identically
+    # for every model. FPS is derived from the mean latency, so the two can
+    # never disagree. See evaluation/latency.py for why the tail matters
+    # more than the mean here.
     frame0 = cv2.imread(pairs[0][0], cv2.IMREAD_COLOR)
-    for _ in range(args.fps_warmup):
-        estimator.infer(frame0)
-    t0 = time.time()
-    for _ in range(args.fps_cycles):
-        estimator.infer(frame0)
-    dt = time.time() - t0
-    fps = args.fps_cycles / dt if dt > 0 else float("inf")
+    lat = measure_latency(
+        lambda: estimator.infer(frame0),
+        warmup=args.fps_warmup,
+        cycles=args.fps_cycles,
+        device=getattr(estimator, "device", None),
+    )
 
     return {
         "model": name,
@@ -267,14 +272,14 @@ def evaluate_model(name: str, estimator, pairs, args):
         "macs_g": macs_g,
         "macs_g_ref": macs_ref,
         "feed_hw": f"{feed_h}x{feed_w}",
-        "fps": fps,
+        **lat,  # lat_mean_ms ... lat_max_ms, plus fps derived from the mean
     }
 
 
 def print_table(rows):
     has_ref = any(r.get("macs_g_ref") is not None for r in rows)
     headers = ["Model", "N", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3",
-               "Params(M)", "GMACs", "FeedHxW", "FPS"]
+               "Params(M)", "GMACs", "FeedHxW", "FPS", "p95(ms)"]
     if has_ref:
         headers.insert(11, "GMACs@ref")
     widths = [max(len(h), 12) for h in headers]
@@ -295,8 +300,18 @@ def print_table(rows):
         ]
         if has_ref:
             values.append("n/a" if r.get("macs_g_ref") is None else f"{r['macs_g_ref']:.3f}")
-        values += [r["feed_hw"], f"{r['fps']:.1f}"]
+        values += [r["feed_hw"], f"{r['fps']:.1f}", f"{r['lat_p95_ms']:.2f}"]
         print(fmt_row(values))
+
+    # Second table: the full latency distribution. Kept separate rather than
+    # bolted onto the one above, which is already at the width a terminal can
+    # show. p95 appears in both because it is the number that decides whether
+    # a model is fast ENOUGH, while the mean only says how fast it usually is.
+    print()
+    print(format_latency_table(
+        rows,
+        title="Per-inference latency (full .infer() path: resize -> H2D -> forward -> D2H):",
+    ))
 
 
 def parse_args():
@@ -311,8 +326,14 @@ def parse_args():
     p.add_argument("--max_depth", type=float, default=MAX_DEPTH_M)
     p.add_argument("--device", default="cuda")
     p.add_argument("--yolo_imgsz", type=int, default=YOLO_DEPTH_IMGSZ)
-    p.add_argument("--fps_cycles", type=int, default=100)
-    p.add_argument("--fps_warmup", type=int, default=10)
+    # Old --fps_* spellings kept as aliases so existing commands/scripts do
+    # not break; both now drive the latency sampler, since FPS is derived
+    # from mean latency rather than measured separately.
+    p.add_argument("--latency_cycles", "--fps_cycles", dest="fps_cycles", type=int, default=200,
+                    help="Timed inferences per model. p99 is interpolated from the top ~1%%, so "
+                         "raise this (500+) if you intend to quote p99 in a paper.")
+    p.add_argument("--latency_warmup", "--fps_warmup", dest="fps_warmup", type=int, default=20,
+                    help="Untimed calls first, to absorb CUDA context creation and cuDNN autotuning")
     p.add_argument("--macs_ref_hw", default=f"{INPUT_HEIGHT}x{INPUT_WIDTH}",
                     help="HxW at which to additionally measure every model's MACs, so the "
                          "numbers are comparable across models whose TENSOR shapes differ "
